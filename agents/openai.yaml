@@ -1,0 +1,4 @@
+interface:
+  display_name: "程控仪器闭环实验室"
+  short_description: "安全控制示波器和程控仪器，采集原始证据并闭环验证"
+  default_prompt: "Use $codex-scpi-instrument-lab to connect to my bench instrument, verify it safely, and run an evidence-backed hardware test."

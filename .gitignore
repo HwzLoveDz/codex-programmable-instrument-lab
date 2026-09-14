@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+
+# Local configuration and credentials
+.env
+.env.*
+*.pem
+*.key
+
+# Instrument evidence that may contain identifiers or local endpoints
+idn_private.txt
+**/idn_private.txt
+commands.jsonl
+**/commands.jsonl
+/runs/
+/outputs/
+/evidence/
+
+# Editor and OS files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
