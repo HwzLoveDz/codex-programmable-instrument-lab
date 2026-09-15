@@ -18,6 +18,8 @@ venv/
 # Instrument evidence that may contain identifiers or local endpoints
 idn_private.txt
 **/idn_private.txt
+tinysa_info_private.txt
+**/tinysa_info_private.txt
 commands.jsonl
 **/commands.jsonl
 /runs/

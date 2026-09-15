@@ -1,6 +1,6 @@
 ---
 name: codex-scpi-instrument-lab
-description: Control programmable bench instruments for closed-loop hardware experiments and evidence-backed validation. Use for SCPI, VISA, socket discovery, oscilloscope acquisition, automated sweeps, pass/fail limits, data capture, or test reporting; initially supports the SIGLENT SDS3104X HD.
+description: Control programmable bench instruments for closed-loop hardware experiments and evidence-backed validation. Use for SCPI, VISA, USB serial, oscilloscope or spectrum acquisition, automated sweeps, pass/fail limits, data capture, and test reporting. Hardware-validated targets include SIGLENT SDS3104X HD and tinySA Ultra+ ZS407.
 ---
 
 # 程控仪器闭环实验室
@@ -15,6 +15,8 @@ description: Control programmable bench instruments for closed-loop hardware exp
 - **新增仪器**：先读厂商针对准确型号/固件的官方编程手册，再按 [references/adapter-contract.md](references/adapter-contract.md) 增加适配器。不要假定不同品牌或系列的 SCPI 方言相同。
 
 控制 SIGLENT SDS3104X HD 时，必须先读 [references/siglent-sds3104x-hd.md](references/siglent-sds3104x-hd.md)。
+
+控制 tinySA Ultra+ ZS407 或做板级 EMI 近场预扫时，必须先读 [references/tinysa-ultra-plus-zs407.md](references/tinysa-ultra-plus-zs407.md)。它使用 USB CDC 串口命令而不是 SCPI；不要套用其他频谱仪或示波器方言。
 
 ## 证据分层
 
@@ -34,6 +36,7 @@ description: Control programmable bench instruments for closed-loop hardware exp
 - 将仪器与控制电脑接入同一个受信任的实验室路由器/交换机，使用 DHCP 保留地址或静态地址。不要把仪器端口暴露到公网或做端口转发。
 - USBTMC 仅在无可用局域网、需要点对点隔离管理或 LAN 不稳定时作为备用；连接的是示波器 **USB Device** 口，不是 USB Host 口，并通常需要 VISA 后端。
 - LAN/USB 只决定控制链路，不改变示波器 BNC 外壳和保护地关系。
+- ZS407 使用 USB CDC 串口；每次从操作系统重新枚举端口，不固化旧 COM 号。命令以 `\r` 结束，提示符为 `ch>`。连接后不得自动启用任何 RF 输出；经操作员授权可发送 `output off`、`caloutput off`、`pause` 进入安全状态。
 
 ## 每次实验的最小闭环
 
@@ -76,6 +79,22 @@ python scripts/siglent_cal_check.py --host <IP> --out <new-run-dir> --confirm-ca
 
 若操作员已检查探头补偿盒且确认没有早期 `2 GHz ONLY` 标签，可另加 `--confirm-no-2ghz-only-label` 记录该事实；未提供时仍可做 1 kHz 低频闭环，但报告必须把具体探头修订记为未确认。
 
+`scripts/tinysa_zs407_serial.py` 是 ZS407 的独立 USB 串口适配器。实时连接需要 `pyserial`；解析与离线对比不连接仪器。它从不提供 `output on`，扫描前要求操作员分别确认输入接线与安全状态更改：
+
+```text
+python scripts/tinysa_zs407_serial.py --port <current-port> identify
+python scripts/tinysa_zs407_serial.py --port <current-port> safe-pause --confirm-state-changes
+python scripts/tinysa_zs407_serial.py --port <current-port> scan \
+  --out <new-run-dir> --phase <unique-phase> \
+  --start-hz <start> --stop-hz <stop> --points 290 \
+  --external-attenuation-db <nominal-db> \
+  --probe <probe> --probe-position <position> \
+  --operator-dut-state <state> \
+  --confirm-input-only --confirm-state-changes
+```
+
+ZS407 屏幕保持 `Paused` 时仍可执行一次性 `scan`。脚本保存每次原始文本，严格校验完整提示符、点数与频率单调性，并兼容已在指定实机固件观察到的约 −100 dBm 文本格式异常。若操作员更正 DUT 开关状态，必须新建 phase 并使用 `--invalidates-phase`，不能覆盖误标证据。近场扫描只支持相对热点和 A/B 变化，不自动给出 EMC 法规通过/失败。
+
 ## 运行目录约定
 
 每次实测使用独立目录：`YYYYMMDD-HHMMSS_<dut>_<test>`。至少包含：
@@ -84,5 +103,7 @@ python scripts/siglent_cal_check.py --host <IP> --out <new-run-dir> --confirm-ca
 - `commands.jsonl`：按顺序记录命令、响应摘要、耗时和错误；
 - `baseline.*`、`screen.*`、`waveform_raw.*`、`measurements.csv`：按实际采集类型保存；
 - `result.md`：判据、结果、异常、边界和未验证项。
+
+同一运行目录中的每个 DUT 状态或探头位置使用唯一 phase。操作员纠正工况时保留原始 phase，新增 corrected phase 并显式声明被取代的阶段。
 
 日志、截图或导出的报告不得保存账号密码、网络凭据或不必要的设备序列号。

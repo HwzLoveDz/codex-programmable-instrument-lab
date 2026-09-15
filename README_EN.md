@@ -4,15 +4,18 @@
 
 A Codex skill for programmable bench instruments. It turns test intent, safe wiring, instrument configuration, acquisition, acceptance criteria, and evidence retention into a reproducible closed-loop hardware workflow.
 
-This is an unofficial community tool. It is not affiliated with, endorsed by, or sponsored by SIGLENT Technologies.
+This is an unofficial community tool. It is not affiliated with, endorsed by, or sponsored by SIGLENT Technologies or the tinySA project.
 
-The first hardware-validated target is the **SIGLENT SDS3104X HD**. The repository also defines an adapter contract for future signal generators, power supplies, electronic loads, multimeters, and other SCPI/VISA instruments. It does not assume that different models share identical commands.
+Hardware-validated targets include the **SIGLENT SDS3104X HD** and **tinySA Ultra+ ZS407**. The latter uses a USB serial command interface, not SCPI. The repository also defines an adapter contract for future signal generators, power supplies, electronic loads, multimeters, and other programmable instruments. It does not assume that different models share commands or transports.
 
 ## Current capabilities
 
 - Native SCPI over LAN sockets (TCP 5025) for read-only identification, queries, and screenshots;
 - strict validation of SCPI query headers, complete LF-terminated text responses, binary boundaries, and PNG CRCs;
 - a constrained SDS3104X HD + SP3050A + front-panel Cal loop;
+- ZS407 USB CDC identification, safe pause, one-shot narrow scans, and matched off/on comparisons;
+- board-level relative EMI hotspot localization with large/small H-field probes and a probable E-field probe;
+- compatibility with the three-column `scan` response and approximately -100 dBm text-format quirk observed on the validated ZS407 firmware;
 - allowlisted write commands, two independent operator confirmations, synchronization, and readback in one persistent session;
 - separation of raw evidence, derived data, and physical conclusions, with device serial numbers redacted from logs by default.
 
@@ -47,6 +50,27 @@ If the probe compensation box has been inspected and does not carry the early `2
 --confirm-no-2ghz-only-label
 ```
 
+Live ZS407 control requires `pyserial`. Re-enumerate the port for each session instead of permanently copying the example COM number:
+
+```text
+python -m pip install pyserial
+python scripts/tinysa_zs407_serial.py --port <current-port> identify
+python scripts/tinysa_zs407_serial.py --port <current-port> safe-pause --confirm-state-changes
+```
+
+After the operator confirms the analyzer-input wiring, external attenuation, probe fixture, and DUT state, run an evidence-preserving scan:
+
+```text
+python scripts/tinysa_zs407_serial.py --port <current-port> scan \
+  --out runs/20260915-dut-nearfield --phase dcdc-board-off \
+  --start-hz 900000 --stop-hz 5500000 --points 290 \
+  --external-attenuation-db 20 --probe "small H loop" \
+  --probe-position "DCDC inductor" --operator-dut-state off \
+  --confirm-input-only --confirm-state-changes
+```
+
+See the [ZS407 reference](references/tinysa-ultra-plus-zs407.md) for command details, probe orientation, and operator-state corrections.
+
 ## Safety boundaries
 
 - A standard benchtop oscilloscope probe ground clip is normally connected to protective earth. Never attach it to mains live, a half-bridge switching node, or another non-ground high-side node. Use an appropriately rated differential probe or isolated measurement method when required.
@@ -55,6 +79,9 @@ If the probe compensation box has been inspected and does not carry the early `2
 - The official EN11H programming guide does not document an error-queue query, and AutoSet and Simple ITEM have no independent query. `*OPC?` proves synchronization only. `cal_loop_acquired` means that the target mode/source and plausible FREQ/PKPK results were observed; it does not independently prove acceptance of every write command.
 - The front-panel Cal output is a nominal 1 kHz, 3 V square wave, not a traceable precision standard. This test does not prove oscilloscope amplitude/time-base calibration or 500 MHz probe bandwidth.
 - Future adapters for sources, supplies, loads, or relays must keep energy output OFF until the operator confirms wiring, polarity, limits, and stop conditions.
+- The ZS407 adapter exposes no `output on` operation. `safe-pause` disables normal RF and calibration outputs and pauses continuous sweeping; one-shot `scan` acquisition remains valid while the screen shows `Paused`.
+- Start unknown near-field work with a correctly rated external attenuator. An uncalibrated near-field probe supports relative hotspot and A/B analysis only, not regulatory field strength or EMC pass/fail claims.
+- If the operator corrects an on/off state label, preserve and invalidate the original phase and create a new corrected phase instead of overwriting evidence.
 
 ## Privacy and evidence
 
@@ -70,7 +97,7 @@ The repository `.gitignore` excludes common local run directories, private IDN f
 python -B -m unittest discover -s scripts -p "test_*.py"
 ```
 
-The tests use only a simulated instrument on `127.0.0.1`. They do not scan the LAN or connect to a real oscilloscope.
+Offline tests use a local simulated socket and simulated serial transport. They do not scan the LAN or connect to real instruments. Live ZS407 access requires `pyserial`; offline parsing and tests do not.
 
 ## Official references
 
@@ -78,6 +105,9 @@ The tests use only a simulated instrument on `127.0.0.1`. They do not scan the L
 - [SDS3000X HD Programming Guide](https://int.siglent.com/u_file/document/SDS3000X%20HD_ProgrammingGuide_EN11H.pdf)
 - [SIGLENT Passive Probe Datasheet](https://siglent.oss-cn-shenzhen.aliyuncs.com/English_content/Document/Oscilloscope/Probe_DataSheet_EN02C.pdf)
 - [SP3150A / SP3050A Manual](https://siglentna.com/wp-content/uploads/dlm_uploads/2022/08/SP3150ASP3050A-1.pdf)
+- [tinySA Ultra+ ZS407 Specification](https://tinysa.org/wiki/pmwiki.php?n=TinySA4.Specification)
+- [tinySA USB Interface](https://tinysa.org/wiki/pmwiki.php?n=Main.USBInterface)
+- [tinySA PC control](https://tinysa.org/wiki/pmwiki.php?n=Main.PCSW)
 
 ## License
 
