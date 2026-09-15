@@ -4,8 +4,6 @@
 
 A Codex skill for programmable bench instruments. It turns test intent, safe wiring, instrument configuration, acquisition, acceptance criteria, and evidence retention into a reproducible closed-loop hardware workflow.
 
-This is an unofficial community tool. It is not affiliated with, endorsed by, or sponsored by SIGLENT Technologies, tinySA, or Zeenko/LiteVNA.
-
 Hardware-validated targets include the **SIGLENT SDS3104X HD**, **tinySA Ultra+ ZS407**, and **LiteVNA 64 ZN-406**. The latter two use USB text and USB binary protocols respectively, not SCPI. The repository also defines an adapter contract for future signal generators, power supplies, electronic loads, multimeters, and other programmable instruments. It does not assume that different models share commands or transports.
 
 ## Current capabilities
