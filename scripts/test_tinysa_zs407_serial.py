@@ -90,6 +90,14 @@ class AdapterTest(unittest.TestCase):
         self.assertEqual(redacted["firmware"], "Version: tinySA4_v1.4-test")
         self.assertNotIn("SECRET123", json.dumps(redacted))
 
+    def test_measurement_mode_interpretations_are_separate(self):
+        self.assertIn("near-field", tinysa.interpretation_for_mode("near-field-relative"))
+        ambient = tinysa.interpretation_for_mode("ambient-rf-survey")
+        self.assertIn("ambient RF survey", ambient)
+        self.assertNotIn("near-field", ambient)
+        with self.assertRaises(ValueError):
+            tinysa.interpretation_for_mode("mixed-experiment")
+
     def test_safe_pause_requires_confirmation_and_never_enables_output(self):
         fake = FakeSerial(["output off\r\nch> \r\n", "caloutput off\r\nch> \r\n", "pause\r\nch> \r\n"])
         device = tinysa.TinySASerial(fake, timeout=0.1)
@@ -142,6 +150,7 @@ class AdapterTest(unittest.TestCase):
                 probe="small H loop",
                 probe_position="DCDC inductor",
                 operator_dut_state="off",
+                measurement_mode="near-field-relative",
                 invalidates_phase=None,
                 confirm_input_only=True,
                 confirm_state_changes=True,
@@ -152,6 +161,7 @@ class AdapterTest(unittest.TestCase):
             summary_text = (Path(temp_dir) / "board-off-summary.json").read_text(encoding="utf-8")
             self.assertNotIn("SECRET123", summary_text)
             self.assertIn("[REDACTED]", summary_text)
+            self.assertIn("Relative near-field data only", summary_text)
             self.assertIn("SECRET123", (Path(temp_dir) / "tinysa_info_private.txt").read_text(encoding="utf-8"))
             self.assertTrue((Path(temp_dir) / "board-off-scan-01.txt").exists())
             with (Path(temp_dir) / "board-off-traces.csv").open(encoding="utf-8", newline="") as handle:
@@ -167,10 +177,22 @@ class AdapterTest(unittest.TestCase):
             start_hz=100000, stop_hz=300000, points=3, warmup_scans=1, repeats=2,
             settle_seconds=0, external_attenuation_db=20.0, probe="H", probe_position="P",
             operator_dut_state="off", invalidates_phase=None,
+            measurement_mode="near-field-relative",
             confirm_input_only=False, confirm_state_changes=True,
         )
         with self.assertRaises(PermissionError):
             tinysa.scan_run(argparse.Namespace(**base))
+
+        invalid_mode = dict(base)
+        invalid_mode.update(
+            confirm_input_only=True,
+            confirm_state_changes=True,
+            measurement_mode="mixed-experiment",
+        )
+        with mock.patch.object(tinysa, "open_serial") as opener:
+            with self.assertRaisesRegex(ValueError, "unsupported measurement mode"):
+                tinysa.scan_run(argparse.Namespace(**invalid_mode))
+            opener.assert_not_called()
 
 
 class CompareTest(unittest.TestCase):

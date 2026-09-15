@@ -93,7 +93,7 @@ python scripts/tinysa_zs407_serial.py --port <current-port> scan \
   --confirm-input-only --confirm-state-changes
 ```
 
-ZS407 屏幕保持 `Paused` 时仍可执行一次性 `scan`。脚本保存每次原始文本，严格校验完整提示符、点数与频率单调性，并兼容已在指定实机固件观察到的约 −100 dBm 文本格式异常。若操作员更正 DUT 开关状态，必须新建 phase 并使用 `--invalidates-phase`，不能覆盖误标证据。近场扫描只支持相对热点和 A/B 变化，不自动给出 EMC 法规通过/失败。
+ZS407 屏幕保持 `Paused` 时仍可执行一次性 `scan`。脚本保存每次原始文本，严格校验完整提示符、点数与频率单调性，并兼容已在指定实机固件观察到的约 −100 dBm 文本格式异常。若操作员更正 DUT 开关状态，必须新建 phase 并使用 `--invalidates-phase`，不能覆盖误标证据。近场扫描只支持相对热点和 A/B 变化，不自动给出 EMC 法规通过/失败。使用未校准伸缩天线做独立环境频谱时，必须加 `--measurement-mode ambient-rf-survey`，并把天线长度、方向、位置和衰减作为夹具条件；不得把它与板级近场实验混写。
 
 ## 运行目录约定
 

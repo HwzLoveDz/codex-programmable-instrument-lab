@@ -214,6 +214,17 @@ def require_zs407(info: str) -> None:
         raise RuntimeError("attached instrument did not identify as tinySA ULTRA+ ZS407")
 
 
+def interpretation_for_mode(mode: str) -> str:
+    if mode == "ambient-rf-survey":
+        return (
+            "Uncalibrated ambient RF survey; analyzer-input dBm only. The result is not antenna gain, "
+            "field strength, transmitter identification, or compliance evidence."
+        )
+    if mode == "near-field-relative":
+        return "Relative near-field data only; not regulatory field strength or pass/fail evidence."
+    raise ValueError(f"unsupported measurement mode: {mode!r}")
+
+
 def write_new(path: Path, data: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("x", encoding="utf-8", newline="") as handle:
@@ -241,6 +252,8 @@ def scan_run(args: argparse.Namespace) -> int:
         raise ValueError("warmup scans, repeats, and settle time must be non-negative; repeats must be at least 1")
     if not math.isfinite(args.external_attenuation_db) or args.external_attenuation_db < 0:
         raise ValueError("external attenuation must be a finite non-negative value")
+    measurement_mode = getattr(args, "measurement_mode", "near-field-relative")
+    interpretation = interpretation_for_mode(measurement_mode)
     out = Path(args.out)
     expected = [out / f"{args.phase}-scan-{index:02d}.txt" for index in range(1, args.repeats + 1)]
     expected += [out / f"{args.phase}-traces.csv", out / f"{args.phase}-summary.json"]
@@ -290,6 +303,7 @@ def scan_run(args: argparse.Namespace) -> int:
 
     summary = {
         "phase": args.phase,
+        "measurement_mode": measurement_mode,
         "operator_declared_dut_state": args.operator_dut_state,
         "invalidates_phase": args.invalidates_phase,
         "started_utc": started,
@@ -309,7 +323,7 @@ def scan_run(args: argparse.Namespace) -> int:
             "probe": args.probe,
             "probe_position": args.probe_position,
         },
-        "interpretation": "Relative near-field data only; not regulatory field strength or pass/fail evidence.",
+        "interpretation": interpretation,
     }
     write_json_new(out / f"{args.phase}-summary.json", summary)
     with (out / "commands.jsonl").open("a", encoding="utf-8", newline="") as handle:
@@ -410,6 +424,11 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--probe", required=True)
     scan.add_argument("--probe-position", required=True)
     scan.add_argument("--operator-dut-state", required=True)
+    scan.add_argument(
+        "--measurement-mode",
+        choices=("near-field-relative", "ambient-rf-survey"),
+        default="near-field-relative",
+    )
     scan.add_argument("--invalidates-phase")
     scan.add_argument("--confirm-input-only", action="store_true")
     scan.add_argument("--confirm-state-changes", action="store_true")

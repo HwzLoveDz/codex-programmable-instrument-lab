@@ -49,6 +49,14 @@ ZS407 通过 USB CDC 串口控制，命令以 `\r` 结束，提示符为 `ch>`�
 
 探头需用非导电夹具保持位置、方向和 1–3 mm 高度，不得接触焊盘或裸露导体。用手握持会引入位置误差和人体电容耦合；A/B 采集时应固定探头和线缆。
 
+## 未校准伸缩天线的环境频谱
+
+无型号的 SMA 伸缩鞭状天线用于环境射频探索，不得与板级近场定位混为同一实验。先记录完全伸展长度、方向、底座位置和外置衰减；未知环境先串 20 dB 做安全预扫，确认远离过载且信号接近底噪后，才可单独改为 3 dB 再扫。不要在两次扫描间同时改变长度、方向、位置和衰减。
+
+验证天线是否产生有效接收差异时，可在相同底座和方向下比较完全伸展与完全缩短。时间变化的发射机、室内多径和人体靠近都会改变结果，因此这种 A/B 只能证明探索性接收差异，不能得到天线增益或校准频响。分析仪端 dBm 加上外置衰减的标称值也仍不是场强；没有校准天线系数、线损和测试距离时，不得换算为 dBµV/m。
+
+环境扫描必须加 `--measurement-mode ambient-rf-survey`，使摘要明确写成非校准环境 RF 数据。频点落入广播、航空或其他业务频段不等于已经识别发射源；没有解调、持续时间、位置和监管频率资料等证据时，只报告“候选峰值”。
+
 ## 探索性 A/B 流程
 
 1. 记录探头、姿态、位置、外部衰减、频段、点数、DUT 电源和固件功能状态。
@@ -79,6 +87,20 @@ python scripts/tinysa_zs407_serial.py --port <current-port> scan \
   --warmup-scans 1 --repeats 2 --external-attenuation-db 20 \
   --probe "small H loop" --probe-position "DCDC inductor" \
   --operator-dut-state off --confirm-input-only --confirm-state-changes
+```
+
+环境天线扫描示例：
+
+```text
+python scripts/tinysa_zs407_serial.py --port <current-port> scan \
+  --out <new-run-dir> --phase antenna-extended-87p5to108mhz \
+  --start-hz 87500000 --stop-hz 108000000 --points 290 \
+  --warmup-scans 1 --repeats 2 --external-attenuation-db 3 \
+  --probe "30 cm telescopic whip, uncalibrated" \
+  --probe-position "vertical, fully extended, fixed" \
+  --operator-dut-state "not applicable; ambient RF survey" \
+  --measurement-mode ambient-rf-survey \
+  --confirm-input-only --confirm-state-changes
 ```
 
 如果操作员纠正状态，使用新 phase 并显式记录：

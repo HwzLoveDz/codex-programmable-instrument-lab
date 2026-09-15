@@ -15,6 +15,7 @@ Hardware-validated targets include the **SIGLENT SDS3104X HD** and **tinySA Ultr
 - a constrained SDS3104X HD + SP3050A + front-panel Cal loop;
 - ZS407 USB CDC identification, safe pause, one-shot narrow scans, and matched off/on comparisons;
 - board-level relative EMI hotspot localization with large/small H-field probes and a probable E-field probe;
+- a separate ambient-spectrum and extended/collapsed A/B mode for uncalibrated telescopic antennas;
 - compatibility with the three-column `scan` response and approximately -100 dBm text-format quirk observed on the validated ZS407 firmware;
 - allowlisted write commands, two independent operator confirmations, synchronization, and readback in one persistent session;
 - separation of raw evidence, derived data, and physical conclusions, with device serial numbers redacted from logs by default.
@@ -70,6 +71,8 @@ python scripts/tinysa_zs407_serial.py --port <current-port> scan \
 ```
 
 See the [ZS407 reference](references/tinysa-ultra-plus-zs407.md) for command details, probe orientation, and operator-state corrections.
+
+Add `--measurement-mode ambient-rf-survey` for exploratory reception with a telescopic antenna. This mode is separate from board-level near-field work; it reports analyzer-input levels and candidate peaks only, without identifying transmitters or converting readings to field strength.
 
 ## Safety boundaries
 
