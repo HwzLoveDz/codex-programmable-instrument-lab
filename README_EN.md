@@ -1,4 +1,4 @@
-# Codex SCPI Instrument Lab
+# Codex Programmable Instrument Lab
 
 [中文](README.md)
 
@@ -27,10 +27,10 @@ Hardware-validated targets include the **SIGLENT SDS3104X HD**, **tinySA Ultra+ 
 Python 3.10 or later is required. The SIGLENT LAN scripts have no third-party dependencies; live ZS407 and LiteVNA USB control requires `pyserial`. Place this repository in the Codex skills directory and keep the directory name as:
 
 ```text
-codex-scpi-instrument-lab
+codex-programmable-instrument-lab
 ```
 
-A typical path is `$CODEX_HOME/skills/codex-scpi-instrument-lab`, or `~/.codex/skills/codex-scpi-instrument-lab` when `CODEX_HOME` is not set.
+A typical path is `$CODEX_HOME/skills/codex-programmable-instrument-lab`, or `~/.codex/skills/codex-programmable-instrument-lab` when `CODEX_HOME` is not set.
 
 ## Quick start
 
@@ -103,7 +103,7 @@ See the [LiteVNA 64 ZN-406 reference](references/litevna-64-zn406.md) for the co
 
 ## Privacy and evidence
 
-The generated `idn_private.txt` contains the full device IDN and may include a serial number. Do not commit or publish it. `commands.jsonl` redacts the IDN serial number by default, but run directories still require manual review before sharing.
+The generated `idn_private.txt` contains the full device IDN and may include a serial number. Do not commit or publish it. `commands.jsonl` redacts the IDN serial number by default, but run directories still require manual review before sharing. Use a GitHub noreply address for commits to avoid exposing a personal email in public commit metadata.
 
 The `identify` command and the general `query --command "*IDN?"` mode intentionally print the full IDN to the local terminal. Do not paste raw terminal transcripts into public issues, logs, or chats. Store measurement outputs under the repository's `runs/` directory whenever possible.
 

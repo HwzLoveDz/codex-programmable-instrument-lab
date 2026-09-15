@@ -20,7 +20,7 @@ ZS407 通过 USB CDC 串口控制，命令以 `\r` 结束，提示符为 `ch>`�
 - 型号：`tinySA ULTRA+ ZS407`
 - 固件：`tinySA4_v1.4-217-gc5dd31f`
 - Build Time：`Dec 17 2025 10:50:40`
-- Windows 枚举：USB CDC 串口，`VID_0483&PID_5740`；COM 号每次必须重新枚举，不能固化为 CURRENT_PORT。
+- Windows 枚举：USB CDC 串口，`VID_0483&PID_5740`；COM 号每次必须重新枚举，不能固化为某次实测端口。
 
 已实机接受的安全命令为 `output off`、`caloutput off`、`pause`。屏幕保持 `Paused` 不表示单次采集无效；`scan ...` 会执行一次扫描并返回数据。不要在适配器中提供或自动调用 `output on`。
 

@@ -1,6 +1,6 @@
 ---
-name: codex-scpi-instrument-lab
-description: Control programmable bench instruments for closed-loop hardware experiments and evidence-backed validation. Use for SCPI, VISA, USB serial or binary protocols, oscilloscope, spectrum-analyzer, or VNA acquisition, automated sweeps, pass/fail limits, data capture, calibration, and test reporting. Hardware-validated targets include SIGLENT SDS3104X HD, tinySA Ultra+ ZS407, and LiteVNA 64 ZN-406.
+name: codex-programmable-instrument-lab
+description: Automate programmable bench instruments for closed-loop hardware experiments and evidence-backed validation. Use for SCPI, VISA, USB serial or binary protocols, oscilloscope, spectrum-analyzer, or VNA acquisition, automated sweeps, pass/fail limits, data capture, calibration, and test reporting. Hardware-validated targets include SIGLENT SDS3104X HD, tinySA Ultra+ ZS407, and LiteVNA 64 ZN-406.
 ---
 
 # 程控仪器闭环实验室

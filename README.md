@@ -1,4 +1,4 @@
-# Codex SCPI Instrument Lab
+# Codex Programmable Instrument Lab
 
 [English](README_EN.md)
 
@@ -27,10 +27,10 @@
 需要 Python 3.10 或更高版本。SIGLENT LAN 脚本没有第三方依赖；ZS407 与 LiteVNA 实时 USB 控制需要 `pyserial`。将本仓库目录放入 Codex 的技能目录，并保持目录名为：
 
 ```text
-codex-scpi-instrument-lab
+codex-programmable-instrument-lab
 ```
 
-典型位置是 `$CODEX_HOME/skills/codex-scpi-instrument-lab`；未设置 `CODEX_HOME` 时通常为 `~/.codex/skills/codex-scpi-instrument-lab`。
+典型位置是 `$CODEX_HOME/skills/codex-programmable-instrument-lab`；未设置 `CODEX_HOME` 时通常为 `~/.codex/skills/codex-programmable-instrument-lab`。
 
 ## 最小使用示例
 
@@ -103,7 +103,7 @@ python scripts/litevna_zn406.py --port <current-port> acquire-cal-standard \
 
 ## 隐私与证据
 
-运行产物中的 `idn_private.txt` 保存完整设备 IDN，可能包含序列号，不应提交或直接公开。`commands.jsonl` 默认对 IDN 序列号脱敏；仍应在分享运行目录前进行人工检查。
+运行产物中的 `idn_private.txt` 保存完整设备 IDN，可能包含序列号，不应提交或直接公开。`commands.jsonl` 默认对 IDN 序列号脱敏；仍应在分享运行目录前进行人工检查。仓库提交建议使用 GitHub noreply 邮箱，避免把私人邮箱写入公开提交元数据。
 
 `identify` 以及通用 `query --command "*IDN?"` 会按设计把完整 IDN 输出到本地终端；不要把终端记录原样粘贴到公开 Issue、日志或聊天中。建议始终把实测输出目录放在仓库根目录的 `runs/` 下。
 
