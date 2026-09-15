@@ -4,9 +4,9 @@
 
 用于程控台式仪器的 Codex Skill：把测试意图、安全接线、仪器配置、采集、判定和证据留存组织成可复现的硬件实验闭环。
 
-这是非官方社区工具，与 SIGLENT Technologies 或 tinySA 项目没有隶属关系，也不代表其认可或背书。
+这是非官方社区工具，与 SIGLENT Technologies、tinySA 或 Zeenko/LiteVNA 项目没有隶属关系，也不代表其认可或背书。
 
-当前经过实机流程验证的目标包括 **SIGLENT SDS3104X HD** 和 **tinySA Ultra+ ZS407**。后者使用 USB 串口命令而不是 SCPI。仓库同时保留适配器约定，方便后续增加信号源、电源、电子负载、万用表和其他程控仪器，但不会假定不同型号共享命令或传输协议。
+当前经过实机流程验证的目标包括 **SIGLENT SDS3104X HD**、**tinySA Ultra+ ZS407** 和 **LiteVNA 64 ZN-406**。后两者分别使用 USB 文本命令和 USB 二进制协议，而不是 SCPI。仓库同时保留适配器约定，方便后续增加信号源、电源、电子负载、万用表和其他程控仪器，但不会假定不同型号共享命令或传输协议。
 
 ## 当前能力
 
@@ -17,12 +17,14 @@
 - 大环/小环 H 场探头与疑似 E 场探头的板级 EMI 相对热点定位流程；
 - 未校准伸缩天线的独立环境频谱与伸展/缩短 A/B 验证模式；
 - 兼容 ZS407 指定固件实测发现的三列 `scan` 返回与约 −100 dBm 文本格式异常；
+- LiteVNA SAA2 USB 二进制识别、受限 S11/S21 扫频和 Normal 模式恢复；
+- PORT1 单端 OSL + 正向 Isolation/THRU 主机侧校准、质量门槛和参考面记录；
 - 写命令固定白名单、双重操作员确认、同一持久会话内同步与回读；
 - 原始证据、派生数据和物理结论分层；默认遮蔽日志中的设备序列号。
 
 ## 安装
 
-需要 Python 3.10 或更高版本；运行脚本无第三方 Python 依赖。将本仓库目录放入 Codex 的技能目录，并保持目录名为：
+需要 Python 3.10 或更高版本。SIGLENT LAN 脚本没有第三方依赖；ZS407 与 LiteVNA 实时 USB 控制需要 `pyserial`。将本仓库目录放入 Codex 的技能目录，并保持目录名为：
 
 ```text
 codex-scpi-instrument-lab
@@ -74,6 +76,17 @@ python scripts/tinysa_zs407_serial.py --port <current-port> scan \
 
 使用伸缩天线做环境射频探索时，另加 `--measurement-mode ambient-rf-survey`。该模式与板级近场实验完全分开；输出仅为分析仪端电平和候选峰值，不识别发射台，也不换算场强。
 
+LiteVNA 的 USB 采样是原始未校准复数数据。每次源扫频前必须先确认实际接线，再独立授权本次 RF 输出：
+
+```text
+python scripts/litevna_zn406.py --port <current-port> acquire-cal-standard \
+  --out runs/litevna-cal --phase port1-open --standard open \
+  --start-hz 1000000 --stop-hz 1000000000 --points 401 \
+  --confirm-standard-wiring --confirm-source-sweep
+```
+
+完整的 OPEN、SHORT、LOAD、ISOLATION、THRU 接线顺序、参考面限制与离线求解命令见 [LiteVNA 64 ZN-406 参考](references/litevna-64-zn406.md)。当前实现是一端口 OSL + 正向响应校准，不是双向 12 项 SOLT。
+
 ## 安全边界
 
 - 普通台式示波器探头地夹通常连接保护地。禁止夹到市电火线、半桥开关节点或其他非地高侧节点；需要时使用额定值合适的差分探头或隔离测量方案。
@@ -85,6 +98,8 @@ python scripts/tinysa_zs407_serial.py --port <current-port> scan \
 - ZS407 适配器不提供 `output on`。`safe-pause` 会关闭普通 RF 输出与 Cal 输出并暂停连续扫频；屏幕显示 `Paused` 时，一次性 `scan` 仍会执行并返回数据。
 - 未知近场源先使用带宽和阻抗合适的外置衰减器。未校准近场探头只能做热点与相对 A/B 比较，不能换算为法规场强或直接判定 EMC 合格。
 - 操作员更正开机/关机状态时，旧阶段保留并标记无效，新建 corrected phase；禁止覆盖原始证据。
+- 涉及现实世界换线、探头位置或 DUT 状态时，脚本不能自行感知完成：必须给出一个明确动作、等待操作员确认、再采集，并在采集结束后立即说明可以移动。
+- LiteVNA 的准确 `ZN-406` 型号来自操作员核对机身标签；USB 电子读回只证明兼容的 LiteVNA variant/protocol。机内校准不会自动应用到 USB 原始数据。
 
 ## 隐私与证据
 
@@ -111,6 +126,8 @@ python -B -m unittest discover -s scripts -p "test_*.py"
 - [tinySA Ultra+ ZS407 Specification](https://tinysa.org/wiki/pmwiki.php?n=TinySA4.Specification)
 - [tinySA USB Interface](https://tinysa.org/wiki/pmwiki.php?n=Main.USBInterface)
 - [tinySA PC control](https://tinysa.org/wiki/pmwiki.php?n=Main.PCSW)
+- [Zeenko LiteVNA product page](https://www.zeenko.tech/litevna)
+- [LiteVNA User Guide](https://nanovna.com/wp-content/uploads/2021/11/LiteVNA_User-Guide.pdf)
 
 ## 许可证
 

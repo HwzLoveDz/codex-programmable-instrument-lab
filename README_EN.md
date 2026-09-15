@@ -4,9 +4,9 @@
 
 A Codex skill for programmable bench instruments. It turns test intent, safe wiring, instrument configuration, acquisition, acceptance criteria, and evidence retention into a reproducible closed-loop hardware workflow.
 
-This is an unofficial community tool. It is not affiliated with, endorsed by, or sponsored by SIGLENT Technologies or the tinySA project.
+This is an unofficial community tool. It is not affiliated with, endorsed by, or sponsored by SIGLENT Technologies, tinySA, or Zeenko/LiteVNA.
 
-Hardware-validated targets include the **SIGLENT SDS3104X HD** and **tinySA Ultra+ ZS407**. The latter uses a USB serial command interface, not SCPI. The repository also defines an adapter contract for future signal generators, power supplies, electronic loads, multimeters, and other programmable instruments. It does not assume that different models share commands or transports.
+Hardware-validated targets include the **SIGLENT SDS3104X HD**, **tinySA Ultra+ ZS407**, and **LiteVNA 64 ZN-406**. The latter two use USB text and USB binary protocols respectively, not SCPI. The repository also defines an adapter contract for future signal generators, power supplies, electronic loads, multimeters, and other programmable instruments. It does not assume that different models share commands or transports.
 
 ## Current capabilities
 
@@ -17,12 +17,14 @@ Hardware-validated targets include the **SIGLENT SDS3104X HD** and **tinySA Ultr
 - board-level relative EMI hotspot localization with large/small H-field probes and a probable E-field probe;
 - a separate ambient-spectrum and extended/collapsed A/B mode for uncalibrated telescopic antennas;
 - compatibility with the three-column `scan` response and approximately -100 dBm text-format quirk observed on the validated ZS407 firmware;
+- LiteVNA SAA2 USB binary identification, constrained S11/S21 sweeps, and Normal-mode restoration;
+- host-side PORT1 one-port OSL plus forward Isolation/THRU calibration with quality gates and explicit reference planes;
 - allowlisted write commands, two independent operator confirmations, synchronization, and readback in one persistent session;
 - separation of raw evidence, derived data, and physical conclusions, with device serial numbers redacted from logs by default.
 
 ## Installation
 
-Python 3.10 or later is required. The runtime scripts have no third-party Python dependencies. Place this repository in the Codex skills directory and keep the directory name as:
+Python 3.10 or later is required. The SIGLENT LAN scripts have no third-party dependencies; live ZS407 and LiteVNA USB control requires `pyserial`. Place this repository in the Codex skills directory and keep the directory name as:
 
 ```text
 codex-scpi-instrument-lab
@@ -74,6 +76,17 @@ See the [ZS407 reference](references/tinysa-ultra-plus-zs407.md) for command det
 
 Add `--measurement-mode ambient-rf-survey` for exploratory reception with a telescopic antenna. This mode is separate from board-level near-field work; it reports analyzer-input levels and candidate peaks only, without identifying transmitters or converting readings to field strength.
 
+LiteVNA USB samples are raw, uncalibrated complex data. Confirm the physical fixture and separately authorize every RF source sweep:
+
+```text
+python scripts/litevna_zn406.py --port <current-port> acquire-cal-standard \
+  --out runs/litevna-cal --phase port1-open --standard open \
+  --start-hz 1000000 --stop-hz 1000000000 --points 401 \
+  --confirm-standard-wiring --confirm-source-sweep
+```
+
+See the [LiteVNA 64 ZN-406 reference](references/litevna-64-zn406.md) for the complete OPEN, SHORT, LOAD, ISOLATION, and THRU fixture sequence, reference-plane limitations, and offline solver. This implementation is a one-port OSL plus forward-response calibration, not a bidirectional 12-term SOLT calibration.
+
 ## Safety boundaries
 
 - A standard benchtop oscilloscope probe ground clip is normally connected to protective earth. Never attach it to mains live, a half-bridge switching node, or another non-ground high-side node. Use an appropriately rated differential probe or isolated measurement method when required.
@@ -85,6 +98,8 @@ Add `--measurement-mode ambient-rf-survey` for exploratory reception with a tele
 - The ZS407 adapter exposes no `output on` operation. `safe-pause` disables normal RF and calibration outputs and pauses continuous sweeping; one-shot `scan` acquisition remains valid while the screen shows `Paused`.
 - Start unknown near-field work with a correctly rated external attenuator. An uncalibrated near-field probe supports relative hotspot and A/B analysis only, not regulatory field strength or EMC pass/fail claims.
 - If the operator corrects an on/off state label, preserve and invalidate the original phase and create a new corrected phase instead of overwriting evidence.
+- For any real-world cable, probe, or DUT-state change, give one explicit action, wait for operator confirmation, acquire only afterward, and immediately state when the fixture may be moved.
+- The exact `ZN-406` model comes from the operator's chassis-label check. USB electronic identity proves only a compatible LiteVNA variant/protocol, and on-device calibration is not automatically applied to raw USB samples.
 
 ## Privacy and evidence
 
@@ -111,6 +126,8 @@ Offline tests use a local simulated socket and simulated serial transport. They 
 - [tinySA Ultra+ ZS407 Specification](https://tinysa.org/wiki/pmwiki.php?n=TinySA4.Specification)
 - [tinySA USB Interface](https://tinysa.org/wiki/pmwiki.php?n=Main.USBInterface)
 - [tinySA PC control](https://tinysa.org/wiki/pmwiki.php?n=Main.PCSW)
+- [Zeenko LiteVNA product page](https://www.zeenko.tech/litevna)
+- [LiteVNA User Guide](https://nanovna.com/wp-content/uploads/2021/11/LiteVNA_User-Guide.pdf)
 
 ## License
 

@@ -1,6 +1,6 @@
 ---
 name: codex-scpi-instrument-lab
-description: Control programmable bench instruments for closed-loop hardware experiments and evidence-backed validation. Use for SCPI, VISA, USB serial, oscilloscope or spectrum acquisition, automated sweeps, pass/fail limits, data capture, and test reporting. Hardware-validated targets include SIGLENT SDS3104X HD and tinySA Ultra+ ZS407.
+description: Control programmable bench instruments for closed-loop hardware experiments and evidence-backed validation. Use for SCPI, VISA, USB serial or binary protocols, oscilloscope, spectrum-analyzer, or VNA acquisition, automated sweeps, pass/fail limits, data capture, calibration, and test reporting. Hardware-validated targets include SIGLENT SDS3104X HD, tinySA Ultra+ ZS407, and LiteVNA 64 ZN-406.
 ---
 
 # 程控仪器闭环实验室
@@ -17,6 +17,8 @@ description: Control programmable bench instruments for closed-loop hardware exp
 控制 SIGLENT SDS3104X HD 时，必须先读 [references/siglent-sds3104x-hd.md](references/siglent-sds3104x-hd.md)。
 
 控制 tinySA Ultra+ ZS407 或做板级 EMI 近场预扫时，必须先读 [references/tinysa-ultra-plus-zs407.md](references/tinysa-ultra-plus-zs407.md)。它使用 USB CDC 串口命令而不是 SCPI；不要套用其他频谱仪或示波器方言。
+
+控制 LiteVNA 64 ZN-406、测量 S 参数或执行 OSL/THRU 校准时，必须先读 [references/litevna-64-zn406.md](references/litevna-64-zn406.md)。它使用 USB CDC 上的 SAA2 二进制协议，不是 SCPI；USB 返回原始未校准采样，不能假定机内校准已经应用。
 
 ## 证据分层
 
@@ -47,6 +49,8 @@ description: Control programmable bench instruments for closed-loop hardware exp
 5. 每轮只改变一个主要变量；先用小记录长度、低能量/低限值和少量重复验证方向，再扩大数据量或应力。
 6. 保存原始返回值，分析产物另存。原始数据不可被图表或清洗结果覆盖。
 7. 对照预先定义的判据给出“通过 / 失败 / 证据不足”，同时列出测试条件、异常点和未覆盖边界。
+
+涉及现实世界换线、移动探头、开关 DUT 或安装校准件时，每次只给一个明确动作，等待操作员明确回复完成后才采集。采集完成后立即说明“可以移动/换线”。不得根据等待时间、画面或上一次状态自行推断操作员已完成动作。
 
 ## 硬件安全闸门
 
@@ -94,6 +98,10 @@ python scripts/tinysa_zs407_serial.py --port <current-port> scan \
 ```
 
 ZS407 屏幕保持 `Paused` 时仍可执行一次性 `scan`。脚本保存每次原始文本，严格校验完整提示符、点数与频率单调性，并兼容已在指定实机固件观察到的约 −100 dBm 文本格式异常。若操作员更正 DUT 开关状态，必须新建 phase 并使用 `--invalidates-phase`，不能覆盖误标证据。近场扫描只支持相对热点和 A/B 变化，不自动给出 EMC 法规通过/失败。使用未校准伸缩天线做独立环境频谱时，必须加 `--measurement-mode ambient-rf-survey`，并把天线长度、方向、位置和衰减作为夹具条件；不得把它与板级近场实验混写。
+
+`scripts/litevna_zn406.py` 是受限的 LiteVNA SAA2 USB 适配器。它只允许文档化寄存器、限定 50 kHz–6.3 GHz 和 2–1024 点，每次源扫频都要求接线确认与独立 RF 输出授权，结束后请求恢复 Normal 模式并关闭串口。准确的 `ZN-406` 型号来自操作员读取机身标签；USB 标识只能证明兼容的 LiteVNA variant/protocol/hardware/firmware，不能独立证明销售型号。
+
+`scripts/litevna_calibration.py` 离线生成 PORT1 单端 OSL 与正向 S21 Isolation/THRU 响应校准系数，并拒绝频率网格不一致、OPEN/SHORT 退化或 THRU/Isolation 无法区分的数据。该结果不是双向 12 项 SOLT。参考面、线缆、转接头、频率网格或点数改变后必须重新校准；裸端口 OPEN 未知的边缘电容必须作为高频不确定度记录。
 
 ## 运行目录约定
 
