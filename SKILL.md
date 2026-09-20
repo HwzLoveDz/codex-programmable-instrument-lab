@@ -1,6 +1,6 @@
 ---
 name: codex-programmable-instrument-lab
-description: Automate programmable bench instruments for closed-loop hardware experiments and evidence-backed validation. Use for SCPI, VISA, USB serial or binary protocols, oscilloscope, spectrum-analyzer, or VNA acquisition, automated sweeps, pass/fail limits, data capture, calibration, and test reporting. Hardware-validated targets include SIGLENT SDS3104X HD, tinySA Ultra+ ZS407, and LiteVNA 64 ZN-406.
+description: Automate programmable bench instruments for closed-loop hardware experiments and evidence-backed validation. Use for SCPI, VISA, USB serial or binary protocols, oscilloscope, spectrum-analyzer, VNA or multimeter acquisition, sweeps, data capture, calibration, and test reporting. Validated command workflows include SIGLENT SDS3104X HD, tinySA Ultra+ ZS407, LiteVNA 64 ZN-406, and FLUKE 8845A low-voltage DC measurements.
 ---
 
 # 程控仪器闭环实验室
@@ -19,6 +19,8 @@ description: Automate programmable bench instruments for closed-loop hardware ex
 控制 tinySA Ultra+ ZS407 或做板级 EMI 近场预扫时，必须先读 [references/tinysa-ultra-plus-zs407.md](references/tinysa-ultra-plus-zs407.md)。它使用 USB CDC 串口命令而不是 SCPI；不要套用其他频谱仪或示波器方言。
 
 控制 LiteVNA 64 ZN-406、测量 S 参数或执行 OSL/THRU 校准时，必须先读 [references/litevna-64-zn406.md](references/litevna-64-zn406.md)。它使用 USB CDC 上的 SAA2 二进制协议，不是 SCPI；USB 返回原始未校准采样，不能假定机内校准已经应用。
+
+控制 FLUKE 8845A 万用表、排查 LAN 建链或读取低压直流电源时，先读 [references/fluke-8845a.md](references/fluke-8845a.md)。使用 TCP 3490 + LF，不套用示波器 5025；`READ?` 会触发采集，不能混入只读配置查询。
 
 ## 证据分层
 
@@ -52,6 +54,8 @@ description: Automate programmable bench instruments for closed-loop hardware ex
 
 涉及现实世界换线、移动探头、开关 DUT 或安装校准件时，每次只给一个明确动作，等待操作员明确回复完成后才采集。采集完成后立即说明“可以移动/换线”。不得根据等待时间、画面或上一次状态自行推断操作员已完成动作。
 
+用户明确确认已接好并要求测量时，确认覆盖的接线与必要设置可直接执行，不机械重复询问；脚本确认参数只记录已有授权。意外断开或工况更正后新建采集阶段，关联旧阶段并保留原始数据，不能悄悄丢弃低读数来制造稳定结论。
+
 ## 硬件安全闸门
 
 - 台式示波器普通探头地夹通常连接保护地。禁止把它夹到市电火线、半桥开关节点、浮地电源高侧等非地节点；使用额定值合适的差分探头或隔离测量方案。禁止断开示波器保护地来“浮地测量”。
@@ -61,6 +65,8 @@ description: Automate programmable bench instruments for closed-loop hardware ex
 - 同一仪器同一时刻只允许一个控制者，避免前面板、Web UI 和脚本相互覆盖设置。
 
 ## 配套脚本
+
+`scripts/fluke_8845a.py` 提供脱敏身份查询、只读配置快照、本地操作恢复，以及受限前面板低压 DCV 采集。需要当前明确 IP 和全新的 `--out` 目录；实例及保护条件见 FLUKE 参考。采集结束尝试 `SYST:LOC` 并关闭 Socket；如果通信中断，明确报告本地恢复未验证，不重放写入。恢复本地操作不等于恢复全部原设置，更不是 `*RST`；仍可能接着电源时，不盲目切回短接用的小量程或电阻/电流档。
 
 `scripts/siglent_socket.py` 是无第三方依赖的 LAN 只读客户端，支持：
 

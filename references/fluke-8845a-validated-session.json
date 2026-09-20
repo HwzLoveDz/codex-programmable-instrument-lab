@@ -1,0 +1,73 @@
+{
+  "evidence_type": "sanitized_live_command_workflow_summary_not_simulated",
+  "validation_date": "2026-09-20",
+  "instrument": "FLUKE 8845A",
+  "identity": "FLUKE,8845A,[REDACTED],08/02/10-11:53",
+  "transport": {
+    "kind": "tcp_socket",
+    "port": 3490,
+    "terminator": "LF"
+  },
+  "tested_commands": {
+    "*IDN?": "FLUKE,8845A,[REDACTED],08/02/10-11:53",
+    "ROUT:TERM?": "FRON",
+    "VOLT:DC:NPLC?": "+1.00000000E+01",
+    "ZERO:AUTO?": "1",
+    "CALC:STAT?": "0",
+    "TRIG:SOUR?": "IMM",
+    "TRIG:COUN?": "+1.00000000E+00",
+    "SAMP:COUN?": "+1",
+    "VOLT:DC:RANG 10": null,
+    "VOLT:DC:RANG?": "+1.00000000E+01",
+    "VOLT:DC:RANG:AUTO?": "0",
+    "SYST:REM": null,
+    "SYST:LOC": null,
+    "*OPC?": "1"
+  },
+  "conf_10V": "\"VOLT +1.000000E+01,+1.000000E-05\"",
+  "short_input": {
+    "samples_V": [
+      0.00000269,
+      0.0000026,
+      0.00000257,
+      0.00000224,
+      0.00000245,
+      0.00000272,
+      0.00000254,
+      0.00000227,
+      0.00000239,
+      0.00000233
+    ],
+    "range_V": 0.1,
+    "math_state": "not queried in this phase",
+    "conclusion": "acquisition only, not calibration"
+  },
+  "nominal_3v3_repeat": {
+    "samples_V": [
+      3.32033,
+      3.320098,
+      3.320125,
+      3.31997,
+      3.320184,
+      3.320152,
+      3.31978,
+      3.320053,
+      3.320137,
+      3.320256
+    ],
+    "range_V": 10,
+    "math_enabled": false,
+    "mean_V": 3.3201085,
+    "span_V": 0.00055,
+    "conclusion": "DC observations only, not ripple or compliance"
+  },
+  "operator_correction": "Initial rail phase had an accidental disconnection confirmed by operator. Original data retained locally; new phase used for repeat observations.",
+  "final_restore": {
+    "command": "SYST:LOC",
+    "completion_query": "*OPC?",
+    "completion_response": "1",
+    "range_retained_V": 10,
+    "physical_keyboard_check": false
+  },
+  "privacy": "No endpoint IP, MAC, hostname, serial number, local user path, or product name"
+}

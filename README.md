@@ -4,11 +4,12 @@
 
 用于程控台式仪器的 Codex Skill：把测试意图、安全接线、仪器配置、采集、判定和证据留存组织成可复现的硬件实验闭环。
 
-当前经过实机流程验证的目标包括 **SIGLENT SDS3104X HD**、**tinySA Ultra+ ZS407** 和 **LiteVNA 64 ZN-406**。后两者分别使用 USB 文本命令和 USB 二进制协议，而不是 SCPI。仓库同时保留适配器约定，方便后续增加信号源、电源、电子负载、万用表和其他程控仪器，但不会假定不同型号共享命令或传输协议。
+当前经过实机命令流程验证的目标包括 **SIGLENT SDS3104X HD**、**tinySA Ultra+ ZS407**、**LiteVNA 64 ZN-406** 和 **FLUKE 8845A**。tinySA 与 LiteVNA 分别使用 USB 文本命令和 USB 二进制协议，而不是 SCPI；FLUKE 使用 LAN SCPI。仓库同时保留适配器约定，方便后续增加信号源、电源、电子负载和其他程控仪器，但不会假定不同型号共享命令或传输协议。
 
 ## 当前能力
 
-- LAN 原生 SCPI Socket（TCP 5025）只读识别、查询和截图；
+- SIGLENT LAN 原生 SCPI Socket（TCP 5025）只读识别、查询和截图；
+- FLUKE 8845A LAN（TCP 3490）脱敏识别、配置快照、低压直流采集及本地操作恢复；
 - 严格校验 SCPI 查询头、完整 LF 文本响应、二进制边界及 PNG CRC；
 - SDS3104X HD + SP3050A + 前面板 Cal 的受限闭环；
 - ZS407 USB CDC 串口识别、安全暂停、一次性窄带扫描及 off/on 对比；
@@ -22,7 +23,7 @@
 
 ## 安装
 
-需要 Python 3.10 或更高版本。SIGLENT LAN 脚本没有第三方依赖；ZS407 与 LiteVNA 实时 USB 控制需要 `pyserial`。将本仓库目录放入 Codex 的技能目录，并保持目录名为：
+需要 Python 3.10 或更高版本。SIGLENT 和 FLUKE LAN 脚本没有第三方依赖；ZS407 与 LiteVNA 实时 USB 控制需要 `pyserial`。将本仓库目录放入 Codex 的技能目录，并保持目录名为：
 
 ```text
 codex-programmable-instrument-lab
@@ -85,6 +86,24 @@ python scripts/litevna_zn406.py --port <current-port> acquire-cal-standard \
 
 完整的 OPEN、SHORT、LOAD、ISOLATION、THRU 接线顺序、参考面限制与离线求解命令见 [LiteVNA 64 ZN-406 参考](references/litevna-64-zn406.md)。当前实现是一端口 OSL + 正向响应校准，不是双向 12 项 SOLT。
 
+### FLUKE 8845A 万用表
+
+先选择仪器的活动 LAN 接口；编辑网络配置页不等于启用 LAN。默认端口为 **3490**。修改 IP／掩码后须用后面板电源开关重新上电。每次使用当前操作员确认的地址，不固定本机地址或扫描网段。
+
+```text
+python scripts/fluke_8845a.py --host <current-dmm-ip> --out runs/dmm-identify identify
+python scripts/fluke_8845a.py --host <current-dmm-ip> --out runs/dmm-config snapshot
+```
+
+用户已确认前面板 INPUT HI／LO 接到低压直流信号与参考地，并要求测量后，可以记录该授权并采集：
+
+```text
+python scripts/fluke_8845a.py --host <current-dmm-ip> --out runs/dmm-3v3 dcv --range-v 10 --count 10 --phase rail-3v3 --operator-state "3.3 V rail connected to front INPUT HI/LO" --confirm-wiring --confirm-state-changes
+python scripts/fluke_8845a.py --host <current-dmm-ip> --out runs/dmm-local restore-local --confirm-state-changes
+```
+
+适配器只接受已处于前面板 DCV 的仪器，核对数学功能、触发方式和量程回读。结束恢复本地操作，保留适用量程并关闭连接；它不会执行调零、复位或校准。短接及 3.3 V 采集命令已经过实机验证；各 Python 分支的验证层级见 [FLUKE 参考](references/fluke-8845a.md)。
+
 ## 安全边界
 
 - 普通台式示波器探头地夹通常连接保护地。禁止夹到市电火线、半桥开关节点或其他非地高侧节点；需要时使用额定值合适的差分探头或隔离测量方案。
@@ -98,12 +117,14 @@ python scripts/litevna_zn406.py --port <current-port> acquire-cal-standard \
 - 操作员更正开机/关机状态时，旧阶段保留并标记无效，新建 corrected phase；禁止覆盖原始证据。
 - 涉及现实世界换线、探头位置或 DUT 状态时，脚本不能自行感知完成：必须给出一个明确动作、等待操作员确认、再采集，并在采集结束后立即说明可以移动。
 - LiteVNA 的准确 `ZN-406` 型号来自操作员核对机身标签；USB 电子读回只证明兼容的 LiteVNA variant/protocol。机内校准不会自动应用到 USB 原始数据。
+- FLUKE 的 `READ?` 会触发测量，不能混入只读配置查询；数学／相对值功能开启、非立即单样本触发时，受限脚本停止而不暗改设置。低速 DC 样本跨度不是纹波，未知容差时不做合格判定。
+- 操作员报告意外断开后，保留原始阶段并记录更正，新建阶段重测。仪器连接被重置时最多显式重试一次身份建链；不在写入或采集结果不确定后自动重放。
 
 ## 隐私与证据
 
 运行产物中的 `idn_private.txt` 保存完整设备 IDN，可能包含序列号，不应提交或直接公开。`commands.jsonl` 默认对 IDN 序列号脱敏；仍应在分享运行目录前进行人工检查。仓库提交建议使用 GitHub noreply 邮箱，避免把私人邮箱写入公开提交元数据。
 
-`identify` 以及通用 `query --command "*IDN?"` 会按设计把完整 IDN 输出到本地终端；不要把终端记录原样粘贴到公开 Issue、日志或聊天中。建议始终把实测输出目录放在仓库根目录的 `runs/` 下。
+SIGLENT 的 `identify` 以及通用 `query --command "*IDN?"` 会按设计把完整 IDN 输出到本地终端；不要把终端记录原样粘贴到公开 Issue、日志或聊天中。FLUKE 脚本则对终端和文件中的序列号同时脱敏，不生成私有 IDN 文件。建议始终把实测输出目录放在仓库根目录的 `runs/` 下。
 
 仓库的 `.gitignore` 默认排除常见本地运行目录、私有 IDN 和命令日志。不要在源码、测试、Issue 或提交历史中保存仪器凭据、网络密码或设备序列号。
 
@@ -126,6 +147,7 @@ python -B -m unittest discover -s scripts -p "test_*.py"
 - [tinySA PC control](https://tinysa.org/wiki/pmwiki.php?n=Main.PCSW)
 - [Zeenko LiteVNA product page](https://www.zeenko.tech/litevna)
 - [LiteVNA User Guide](https://nanovna.com/wp-content/uploads/2021/11/LiteVNA_User-Guide.pdf)
+- [FLUKE 8845A/8846A Programmers Manual](https://media.fluke.com/8f58fba8-10bb-438b-a91b-b10800c2bbc4_original%20file.pdf)
 
 ## 许可证
 
