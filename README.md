@@ -4,13 +4,14 @@
 
 用于程控台式仪器的 Codex Skill：把测试意图、安全接线、仪器配置、采集、判定和证据留存组织成可复现的硬件实验闭环。
 
-已有完整或受限实机流程覆盖 **SIGLENT SDS3104X HD**、**tinySA Ultra+ ZS407**、**LiteVNA 64 ZN-406** 和 **FLUKE 8845A**。另完成一轮 **MDP-M01 + P906 + L1060 + FLUKE 8845A** 低功率联调。MDP-M01 使用 MINIWARE 专有 USB 二进制协议，不是 SCPI；本仓库目前提供该轮协议与结果参考，尚未提供可直接执行的受维护 MDP CLI/适配器。不同型号不共用未经验证的命令或传输假设。
+已有完整或受限实机流程覆盖 **SIGLENT SDS3104X HD**、**tinySA Ultra+ ZS407**、**LiteVNA 64 ZN-406** 和 **FLUKE 8845A**。另完成一轮 **MDP-M01 + P906 + L1060 + FLUKE 8845A** 低功率联调。MDP-M01 使用 MINIWARE 专有 USB 二进制协议，不是 SCPI；本仓库现含受限 MDP CLI/适配器初版，但它目前只通过假串口离线测试，尚未实机验证。不同型号不共用未经验证的命令或传输假设。
 
 ## 当前能力
 
 - SIGLENT LAN 原生 SCPI Socket（TCP 5025）只读识别、查询和截图；
 - FLUKE 8845A LAN（TCP 3490）脱敏识别、配置快照、低压直流采集及本地操作恢复；
 - 一轮 MDP-M01 USB 控制的 P906 5 V 电源、L1060 CC 电子负载与 FLUKE 8845A 并行测量联调，记录控制器状态回读与仪表读数差异；
+- MDP-M01 持久 USB 会话、状态读取、受限 P906／L1060 CC 设定与回读、需逐条确认的输出控制（假串口测试通过，实机验证待完成）；
 - 严格校验 SCPI 查询头、完整 LF 文本响应、二进制边界及 PNG CRC；
 - SDS3104X HD + SP3050A + 前面板 Cal 的受限闭环；
 - ZS407 USB CDC 串口识别、安全暂停、一次性窄带扫描及 off/on 对比；
@@ -24,7 +25,7 @@
 
 ## 安装
 
-需要 Python 3.10 或更高版本。SIGLENT 和 FLUKE LAN 脚本没有第三方依赖；ZS407 与 LiteVNA 实时 USB 控制需要 `pyserial`。将本仓库目录放入 Codex 的技能目录，并保持目录名为：
+需要 Python 3.10 或更高版本。SIGLENT 和 FLUKE LAN 脚本没有第三方依赖；ZS407、LiteVNA 与 MDP-M01 实时 USB 控制需要 `pyserial`。将本仓库目录放入 Codex 的技能目录，并保持目录名为：
 
 ```text
 codex-programmable-instrument-lab
@@ -113,9 +114,28 @@ python scripts/fluke_8845a.py --host <current-dmm-ip> --retry-identity-once --ou
 
 `identify`、`snapshot`、`dcv` 单次命令仍适合独立诊断，每次调用结束会断联；完整实验应使用 `session`。适配器只接受已处于前面板 DCV 的仪器，核对数学功能、触发方式和量程回读。进入远程测量后，会话结束时尝试恢复本地操作，保留适用量程并关闭连接；它不会执行调零、复位或校准。短接、3.3 V 采集和持久会话已分别做过有限实机验证；证据边界见 [FLUKE 参考](references/fluke-8845a.md)。
 
-### MDP-M01、P906 与 L1060 联调记录
+### MDP-M01、P906 与 L1060 控制适配器与联调记录
 
-已用 M01 的专有 USB 二进制链路确认配对的 P906/L1060 状态并完成一轮 5 V、100 mA CC 轻载测试；Fluke 8845A 跨三个阶段保持一个 LAN 会话。外部测得空载均值 5.006109 V、接入负载均值 5.001783 V（变化 −4.326 mV）。当时没有预先定义电源准确度阈值，所以这是探索性结果，不是合格判定。M01 内部状态回报的 L1060 端电压约 4.938 V，与并联 Fluke 约 5.002 V 不一致，原因未查明。结束时远程请求关闭 P906 未获回读确认；操作者随后手动关机，新的 M01 状态读取确认 P906 和 L1060 均 OFF。协议与完整证据边界见 [MDP 联调参考](references/mdp-m01-p906-l1060.md)。该记录不是一个可直接调用的 MDP 控制 CLI。
+适配器只支持动态状态识别、P906 输出关闭时同时设定电压／限流、L1060 已在 CC 模式且输入关闭时设定电流，以及逐条显式确认的输出开／关。不提供任意协议透传或 L1060 模式切换；L1060 CC 初版软件上限为 1 A。实机测试前先检查本次的设备映射、接线、输出状态及安全包络，不允许并行打开 MINIWARE 上位机。`session` 子命令在 `end` 前保持同一 USB 串口连接：
+
+```text
+python -m pip install pyserial
+python scripts/mdp_m01.py status
+python scripts/mdp_m01.py --port <当前 MDP-M01 串口> session
+{"op":"status"}
+{"op":"arm","max_voltage_v":5,"max_current_a":0.3,"max_power_w":1.5,"confirm_wiring":true}
+{"op":"set_p906","channel":1,"voltage_v":5,"current_limit_a":0.3}
+{"op":"set_l1060_cc","channel":2,"current_a":0.1}
+{"op":"output_on","channel":2,"confirm_energy":true}
+{"op":"output_on","channel":1,"confirm_energy":true}
+{"op":"output_off","channel":2}
+{"op":"output_off","channel":1}
+{"op":"end"}
+```
+
+以上通道号和数值只是示例：必须先按本次 `status` 回读辨认通道，确认真实接线、极性、负载和风险上限，再逐步操作。`arm` 要求所有在线输出均为 OFF；设置值也只能在相应输出 OFF 时更改。每个状态变化后等新的状态帧核对。若输出开关回读超时／不匹配，不可重发；先让操作者检查实物状态。`end` 只读最后状态并关闭 USB 连接，不会自动关闭任何输出；结束实验前应显式关闭并确认相关输出为 OFF。适配器只通过假串口离线测试，实机验证尚待进行。详细命令字段和证据边界见 [MDP 联调参考](references/mdp-m01-p906-l1060.md)。
+
+已用临时实验程序通过 M01 专有 USB 二进制链路确认配对的 P906/L1060 状态并完成一轮 5 V、100 mA CC 轻载测试；FLUKE 8845A 跨三个阶段保持一个 LAN 会话。外部测得空载均值 5.006109 V、接入负载均值 5.001783 V（变化 −4.326 mV）。当时没有预先定义电源准确度阈值，所以这是探索性结果，不是合格判定。M01 内部状态回报的 L1060 端电压约 4.938 V，与并联 FLUKE 约 5.002 V 不一致，原因未查明。结束时远程请求关闭 P906 未获回读确认；操作者随后手动关机，新的 M01 状态读取确认 P906 和 L1060 均 OFF。该实机结果不能视为新适配器的实机验证。完整协议与证据边界见 [MDP 联调参考](references/mdp-m01-p906-l1060.md)。
 
 ## 安全边界
 
