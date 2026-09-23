@@ -9,6 +9,7 @@ import hashlib
 import ipaddress
 import json
 import math
+import os
 from pathlib import Path
 import socket
 import statistics
@@ -16,7 +17,7 @@ import sys
 import time
 from datetime import datetime, timezone
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 QUERIES = frozenset({
     "*IDN?", "*OPC?", "CONF?", "ROUT:TERM?", "VOLT:DC:NPLC?",
     "ZERO:AUTO?", "CALC:STAT?", "TRIG:SOUR?", "TRIG:COUN?", "SAMP:COUN?",
@@ -59,13 +60,19 @@ class Fluke8845A:
         self.log_path = Path(log_path) if log_path else None
         self.sock = None
         self.identified = False
+        self.remote_restore_pending = False
+        self.connection_count = 0
         self.log = []
 
     def close(self):
         sock, self.sock = self.sock, None
         self.identified = False
         if sock is not None:
-            sock.close()
+            try:
+                sock.close()
+            finally:
+                self._record({"utc": utc_now(), "event": "socket_closed",
+                              "connection_number": self.connection_count})
 
     def _record(self, entry):
         self.log.append(entry)
@@ -104,7 +111,7 @@ class Fluke8845A:
                 text = redact_identity(text)
             entry["response"] = text
             return text
-        except (OSError, EOFError, ValueError) as exc:
+        except BaseException as exc:
             # A partial reply cannot safely be reused by a subsequent query.
             entry["error"] = type(exc).__name__
             self.close()
@@ -119,6 +126,9 @@ class Fluke8845A:
         for attempt in range(2 if retry_identity_once else 1):
             try:
                 self.sock = socket.create_connection((self.host, self.port), self.timeout)
+                self.connection_count += 1
+                self._record({"utc": utc_now(), "event": "connected",
+                              "connection_number": self.connection_count})
                 identity = self._exchange("*IDN?")
                 parts = identity.split(",", 3)
                 if parts[:2] != ["FLUKE", "8845A"]:
@@ -145,6 +155,9 @@ class Fluke8845A:
         allowed = {"SYST:REM", "SYST:LOC"} | {"VOLT:DC:RANG " + r for r in RANGES.values()}
         if not self.identified or command not in allowed:
             raise ValueError("Write not allowed on this verified instrument")
+        if command == "SYST:REM":
+            # Once attempted, restoration is required even if the send fails ambiguously.
+            self.remote_restore_pending = True
         self._exchange(command, reply=False)
 
     def snapshot(self):
@@ -154,13 +167,16 @@ class Fluke8845A:
         self._write("SYST:LOC")
         if self.query("*OPC?") != "1":
             raise ValueError("Local restore completion response was not 1")
+        self.remote_restore_pending = False
         # Completion is not physical evidence that every front-panel key works.
         return {"local_command_processed": True, "front_panel_keys_physically_verified": False}
 
-    def acquire_dcv(self, result, range_v, count, wiring_confirmed, state_changes_confirmed):
+    def acquire_dcv(self, result, range_v, count, wiring_confirmed, state_changes_confirmed,
+                    restore_on_finish=True):
         if not wiring_confirmed or not state_changes_confirmed:
             raise ValueError("Operator wiring and state-change authorization are required")
-        if range_v not in RANGES or isinstance(count, bool) or not isinstance(count, int) or not 1 <= count <= 100:
+        if (isinstance(range_v, bool) or range_v not in RANGES or isinstance(count, bool)
+                or not isinstance(count, int) or not 1 <= count <= 100):
             raise ValueError("Use range 0.1/1/10 V and 1..100 samples")
         # Identity must already be verified. No implicit change of measurement function.
         result["baseline"] = self.snapshot()
@@ -172,9 +188,11 @@ class Fluke8845A:
         if before["TRIG:SOUR?"] != "IMM" or number(before["TRIG:COUN?"]) != 1 or number(before["SAMP:COUN?"]) != 1:
             raise ValueError("Requires one sample per immediate trigger; trigger settings not changed")
         result["measurements"] = []
-        result["local_restore"] = {"local_command_processed": False}
+        result["local_restore"] = ({"local_command_processed": False} if restore_on_finish
+                                   else {"deferred_until_session_end": True})
         try:
-            self._write("SYST:REM")
+            if not self.remote_restore_pending:
+                self._write("SYST:REM")
             self._write("VOLT:DC:RANG " + RANGES[range_v])
             if number(self.query("VOLT:DC:RANG?")) != range_v or self.query("VOLT:DC:RANG:AUTO?") != "0":
                 raise ValueError("Requested fixed range not verified")
@@ -200,15 +218,16 @@ class Fluke8845A:
             }
             result["status"] = "acquired_not_an_accuracy_or_ripple_test"
         finally:
-            # Do not reconnect or replay writes after uncertain execution.
-            try:
-                if self.sock is None:
-                    raise ConnectionError("Link lost; local mode restoration unverified")
-                result["local_restore"] = self.restore_local()
-            except (OSError, EOFError, ValueError, RuntimeError) as exc:
-                result["local_restore"] = {"local_command_processed": False, "error": type(exc).__name__}
-                result["status"] = "incomplete_local_restore_unverified"
-                raise
+            if restore_on_finish:
+                # Do not reconnect or replay writes after uncertain execution.
+                try:
+                    if self.sock is None:
+                        raise ConnectionError("Link lost; local mode restoration unverified")
+                    result["local_restore"] = self.restore_local()
+                except (OSError, EOFError, ValueError, RuntimeError) as exc:
+                    result["local_restore"] = {"local_command_processed": False, "error": type(exc).__name__}
+                    result["status"] = "incomplete_local_restore_unverified"
+                    raise
 
 
 def parser():
@@ -231,7 +250,135 @@ def parser():
     dcv.add_argument("--supersedes-phase", help="Previous phase not suitable for the new physical claim")
     dcv.add_argument("--confirm-wiring", action="store_true")
     dcv.add_argument("--confirm-state-changes", action="store_true")
+    sub.add_parser("session", help="One foreground TCP connection; newline JSON on stdin, end to restore/close")
     return p
+
+
+def _session_request(raw):
+    request = json.loads(raw)
+    if not isinstance(request, dict):
+        raise ValueError("Session request must be a JSON object")
+    operation = request.get("op")
+    if operation in {"snapshot", "end"}:
+        if set(request) != {"op"}:
+            raise ValueError("This operation accepts only op")
+    elif operation == "dcv":
+        required = {"op", "range_v", "count", "phase", "operator_state",
+                    "confirm_wiring", "confirm_state_changes"}
+        optional = {"supersedes_phase"}
+        if not required <= set(request) or set(request) - required - optional:
+            raise ValueError("DCV requires range_v, count, phase, operator_state and both confirmations")
+        if (not isinstance(request["phase"], str) or not request["phase"].strip()
+                or not isinstance(request["operator_state"], str) or not request["operator_state"].strip()
+                or type(request["confirm_wiring"]) is not bool
+                or type(request["confirm_state_changes"]) is not bool
+                or ("supersedes_phase" in request and request["supersedes_phase"] is not None
+                    and not isinstance(request["supersedes_phase"], str))):
+            raise ValueError("Invalid DCV phase, operator state or confirmation types")
+    else:
+        raise ValueError("Session op must be snapshot, dcv or end")
+    return request
+
+
+def run_session(client, args, result, input_stream=None, output_stream=None):
+    """Keep one verified connection across all foreground experiment steps."""
+    input_stream = sys.stdin if input_stream is None else input_stream
+    output_stream = sys.stdout if output_stream is None else output_stream
+    result.update(session_pid=os.getpid(), steps=[], connection_count=0)
+
+    def emit(event):
+        output_stream.write(json.dumps(event, ensure_ascii=False) + "\n")
+        output_stream.flush()
+
+    def persist():
+        result["connection_count"] = client.connection_count
+        (args.out / "manifest.json").write_text(
+            json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        rows = [{"phase": step["phase"], **measurement}
+                for step in result["steps"] if step.get("action") == "dcv"
+                for measurement in step.get("measurements", [])]
+        if rows:
+            with (args.out / "measurements.csv").open("w", encoding="utf-8", newline="") as handle:
+                writer = csv.DictWriter(handle, fieldnames=("phase", "sample", "utc", "raw", "volts"))
+                writer.writeheader()
+                writer.writerows(rows)
+
+    code = 2
+    try:
+        result["identity"] = client.identify(args.retry_identity_once)
+        result["status"] = "session_ready"
+        persist()
+        emit({"event": "session_ready", "pid": result["session_pid"], "identity": result["identity"],
+              "connection_count": client.connection_count,
+              "stop": "Send {\"op\":\"end\"} then newline; Ctrl+C also runs cleanup"})
+        for raw in input_stream:
+            if not raw.strip():
+                continue
+            step = {"index": len(result["steps"]) + 1, "started_utc": utc_now(), "status": "incomplete"}
+            try:
+                request = _session_request(raw)
+                step["action"] = request["op"]
+                if request["op"] == "snapshot":
+                    step["baseline"] = client.snapshot()
+                    step["status"] = "configuration_read_only"
+                elif request["op"] == "dcv":
+                    phase = request["phase"]
+                    if any(previous.get("phase") == phase for previous in result["steps"]):
+                        raise ValueError("Phase must be unique within a session")
+                    step.update(phase=phase, operator_state=request["operator_state"],
+                                supersedes_phase=request.get("supersedes_phase"),
+                                physical_confirmation_source="operator", requested_count=request["count"],
+                                requested_range_V=request["range_v"])
+                    client.acquire_dcv(step, request["range_v"], request["count"],
+                                       request["confirm_wiring"], request["confirm_state_changes"],
+                                       restore_on_finish=False)
+                else:
+                    step["status"] = "end_requested"
+            except BaseException as exc:
+                step["error"] = type(exc).__name__ + ": " + str(exc)
+                result["steps"].append(step)
+                persist()
+                raise
+            result["steps"].append(step)
+            persist()
+            emit({"event": "step_complete", "index": step["index"], "action": step["action"],
+                  "status": step["status"], "statistics": step.get("statistics"),
+                  "connection_count": client.connection_count})
+            if request["op"] == "end":
+                result["status"] = "session_completed"
+                code = 0
+                break
+        else:
+            result["status"] = "incomplete_unexpected_stdin_eof"
+            result["error"] = "Session input closed before end"
+    except KeyboardInterrupt:
+        result["status"] = "incomplete_interrupted"
+        result["error"] = "KeyboardInterrupt"
+        code = 130
+    except Exception as exc:
+        result["status"] = "incomplete"
+        result["error"] = type(exc).__name__ + ": " + str(exc)
+    finally:
+        if client.remote_restore_pending:
+            try:
+                if client.sock is None:
+                    raise ConnectionError("Link lost; local mode restoration unverified")
+                result["local_restore"] = client.restore_local()
+            except (OSError, EOFError, ValueError, RuntimeError) as exc:
+                result["local_restore"] = {"local_command_processed": False,
+                                           "error": type(exc).__name__}
+                result["status"] = "incomplete_local_restore_unverified"
+                code = 2
+        else:
+            result["local_restore"] = {"required": False}
+        client.close()
+        result["socket_closed"] = True
+        result["finished_utc"] = utc_now()
+        persist()
+        emit({"event": "session_ended", "pid": result["session_pid"],
+              "status": result["status"], "local_restore": result["local_restore"],
+              "socket_closed": True, "connection_count": client.connection_count})
+    return code
 
 
 def main(argv=None):
@@ -249,6 +396,8 @@ def main(argv=None):
     if args.action == "dcv":
         result.update(phase=args.phase, operator_state=args.operator_state, supersedes_phase=args.supersedes_phase,
                       physical_confirmation_source="operator", requested_count=args.count, requested_range_V=args.range_v)
+    if args.action == "session":
+        return run_session(client, args, result)
     code = 0
     try:
         result["identity"] = client.identify(args.retry_identity_once)

@@ -4,12 +4,13 @@
 
 A Codex skill for programmable bench instruments. It turns test intent, safe wiring, instrument configuration, acquisition, acceptance criteria, and evidence retention into a reproducible closed-loop hardware workflow.
 
-Hardware-validated command workflows cover the **SIGLENT SDS3104X HD**, **tinySA Ultra+ ZS407**, **LiteVNA 64 ZN-406**, and **FLUKE 8845A**. tinySA and LiteVNA use USB text and USB binary protocols respectively, not SCPI; the FLUKE uses SCPI over LAN. The repository also defines an adapter contract for future signal generators, power supplies, electronic loads, and other programmable instruments. It does not assume that different models share commands or transports.
+Complete or constrained hardware workflows cover the **SIGLENT SDS3104X HD**, **tinySA Ultra+ ZS407**, **LiteVNA 64 ZN-406**, and **FLUKE 8845A**. One low-power integration run also covered **MDP-M01 + P906 + L1060 + FLUKE 8845A**. MDP-M01 uses MINIWARE's proprietary USB binary protocol, not SCPI; this repository currently documents that run but does not include a maintained, directly executable MDP CLI/adapter. Commands and transports are never assumed to be portable across models.
 
 ## Current capabilities
 
 - SIGLENT native SCPI over LAN sockets (TCP 5025) for read-only identification, queries, and screenshots;
 - FLUKE 8845A LAN control (TCP 3490) for redacted identification, configuration snapshots, low-voltage DC acquisition, and local-control restoration;
+- one low-power integration run using MDP-M01 USB control for a P906 5 V supply and L1060 CC load, measured in parallel with a FLUKE 8845A and documented with status readback and meter discrepancies;
 - strict validation of SCPI query headers, complete LF-terminated text responses, binary boundaries, and PNG CRCs;
 - a constrained SDS3104X HD + SP3050A + front-panel Cal loop;
 - ZS407 USB CDC identification, safe pause, one-shot narrow scans, and matched off/on comparisons;
@@ -99,10 +100,22 @@ Once the operator confirms that the front INPUT HI/LO terminals connect to a kno
 
 ```text
 python scripts/fluke_8845a.py --host <current-dmm-ip> --out runs/dmm-3v3 dcv --range-v 10 --count 10 --phase rail-3v3 --operator-state "3.3 V rail connected to front INPUT HI/LO" --confirm-wiring --confirm-state-changes
-python scripts/fluke_8845a.py --host <current-dmm-ip> --out runs/dmm-local restore-local --confirm-state-changes
 ```
 
-The adapter requires an existing front-input DCV configuration and checks math mode, triggering, and range readback. It returns control to the front panel, retains the appropriate range, and closes the connection; it never zeros, resets, or calibrates the meter. Shorted-input and nominal 3.3 V acquisition commands have been tested on hardware. The [FLUKE reference](references/fluke-8845a.md) distinguishes that command evidence from validation of individual Python branches.
+For a multi-phase experiment, keep one foreground session and send one JSON object per line on standard input. Finish with `end`:
+
+```text
+python scripts/fluke_8845a.py --host <current-dmm-ip> --retry-identity-once --out runs/dmm-session session
+{"op":"snapshot"}
+{"op":"dcv","range_v":10,"count":3,"phase":"rail-3v3","operator_state":"front INPUT HI/LO on the confirmed low-voltage rail","confirm_wiring":true,"confirm_state_changes":true}
+{"op":"end"}
+```
+
+Standalone `identify`, `snapshot`, and `dcv` commands remain useful for isolated diagnostics; each invocation closes its connection. Use `session` for a full experiment. The adapter requires an existing front-input DCV configuration and checks math mode, triggering, and range readback. After remote measurement, session shutdown attempts to return control to the front panel, retains the appropriate range, and closes the connection; it never zeros, resets, or calibrates the meter. Shorted-input acquisition, nominal 3.3 V acquisition, and the persistent session have each received limited hardware validation. See the [FLUKE reference](references/fluke-8845a.md) for the evidence boundaries.
+
+### MDP-M01, P906, and L1060 integration record
+
+The M01's proprietary USB binary link was used to confirm the paired P906/L1060 states and run a 5 V, 100 mA CC light-load check; one FLUKE 8845A LAN session was retained across all three phases. The DMM means were 5.006109 V with the load off and 5.001783 V with it on (a −4.326 mV change). No supply-accuracy acceptance limit was defined, so this remains exploratory, not a pass/fail result. M01 telemetry reported about 4.938 V at the L1060 input, inconsistent with the parallel FLUKE reading of about 5.002 V; the cause has not been determined. The remote P906 OFF request was not confirmed by readback; the operator then switched it off locally, and a subsequent M01 status read confirmed both P906 and L1060 OFF. See the [MDP integration reference](references/mdp-m01-p906-l1060.md) for protocol and evidence boundaries. This documentation does not imply that the repository contains a runnable MDP CLI.
 
 ## Safety boundaries
 
@@ -118,6 +131,7 @@ The adapter requires an existing front-input DCV configuration and checks math m
 - For any real-world cable, probe, or DUT-state change, give one explicit action, wait for operator confirmation, acquire only afterward, and immediately state when the fixture may be moved.
 - The exact `ZN-406` model comes from the operator's chassis-label check. USB electronic identity proves only a compatible LiteVNA variant/protocol, and on-device calibration is not automatically applied to raw USB samples.
 - FLUKE `READ?` initiates acquisition and is not a configuration-only query. The constrained adapter stops on active math/relative mode or non-immediate, multi-sample triggering instead of silently reconfiguring them. Slow DC sample spread is not ripple; unspecified tolerances do not justify a pass/fail verdict.
+- MDP-M01 serial writes are not device acknowledgements. Wait for and inspect a status frame after every setpoint or output transition. If remote OFF cannot be confirmed, stop; do not resend blindly. Have the operator verify the physical state before a read-only status retry.
 - After an operator reports an accidental disconnection, retain and annotate the original phase and acquire a new one. A connection reset permits at most one explicitly enabled identity-stage retry; uncertain writes and acquisitions are never replayed automatically.
 
 ## Privacy and evidence
@@ -148,6 +162,7 @@ Offline tests use a local simulated socket and simulated serial transport. They 
 - [Zeenko LiteVNA product page](https://www.zeenko.tech/litevna)
 - [LiteVNA User Guide](https://nanovna.com/wp-content/uploads/2021/11/LiteVNA_User-Guide.pdf)
 - [FLUKE 8845A/8846A Programmers Manual](https://media.fluke.com/8f58fba8-10bb-438b-a91b-b10800c2bbc4_original%20file.pdf)
+- [MINIWARE MDP firmware, upper-computer, and source-code downloads](https://forum.minidso.com/forum.php?mod=viewthread&tid=3685)
 
 ## License
 

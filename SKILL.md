@@ -1,6 +1,6 @@
 ---
 name: codex-programmable-instrument-lab
-description: Automate programmable bench instruments for closed-loop hardware experiments and evidence-backed validation. Use for SCPI, VISA, USB serial or binary protocols, oscilloscope, spectrum-analyzer, VNA or multimeter acquisition, sweeps, data capture, calibration, and test reporting. Validated command workflows include SIGLENT SDS3104X HD, tinySA Ultra+ ZS407, LiteVNA 64 ZN-406, and FLUKE 8845A low-voltage DC measurements.
+description: Automate programmable bench instruments for closed-loop hardware experiments and evidence-backed validation. Use for SCPI, VISA, USB serial or binary protocols, oscilloscope, spectrum-analyzer, VNA, supply, electronic load, or multimeter acquisition and test reporting. Validated workflows include SIGLENT SDS3104X HD, tinySA Ultra+ ZS407, LiteVNA 64 ZN-406, FLUKE 8845A low-voltage DC, and one exploratory MDP-M01/P906/L1060 integration.
 ---
 
 # 程控仪器闭环实验室
@@ -22,6 +22,8 @@ description: Automate programmable bench instruments for closed-loop hardware ex
 
 控制 FLUKE 8845A 万用表、排查 LAN 建链或读取低压直流电源时，先读 [references/fluke-8845a.md](references/fluke-8845a.md)。使用 TCP 3490 + LF，不套用示波器 5025；`READ?` 会触发采集，不能混入只读配置查询。
 
+控制 MDP-M01 配对的 P906 电源或 L1060 电子负载时，先读 [references/mdp-m01-p906-l1060.md](references/mdp-m01-p906-l1060.md)。M01 使用 USB CDC 上的 MINIWARE 专有二进制协议，不是 SCPI；本仓库目前只有协议与一次低功率联调参考，没有可直接执行的受维护 MDP CLI/适配器。
+
 ## 证据分层
 
 始终分开陈述：
@@ -41,6 +43,14 @@ description: Automate programmable bench instruments for closed-loop hardware ex
 - USBTMC 仅在无可用局域网、需要点对点隔离管理或 LAN 不稳定时作为备用；连接的是示波器 **USB Device** 口，不是 USB Host 口，并通常需要 VISA 后端。
 - LAN/USB 只决定控制链路，不改变示波器 BNC 外壳和保护地关系。
 - ZS407 使用 USB CDC 串口；每次从操作系统重新枚举端口，不固化旧 COM 号。命令以 `\r` 结束，提示符为 `ch>`。连接后不得自动启用任何 RF 输出；经操作员授权可发送 `output off`、`caloutput off`、`pause` 进入安全状态。
+- MDP-M01 通过 USB CDC 串口（115200 8N1）控制已配对的 P906/L1060；逐次读取 M01 状态帧识别通道型号、在线状态与输出状态，不能依赖固定通道假设或 SCPI/文本终止符。一次实验复用同一串口会话；控制帧没有独立设备 ACK，必须用后续状态回读确认，超时或不符时停止，不盲目重发输出命令。
+
+## 连接生命周期
+
+- 一次完整实验包括基线、配置、操作员换线或开关机等待、各阶段采集和收尾。对每台参与的仪器，在本次端点与身份确认后建立一个受管会话，跨这些阶段复用同一连接；不要每发一条命令或每运行一次 CLI 就断开再重连。
+- 实验结束后，按该仪器已验证的协议处理远程／本地状态，再关闭连接。只读身份查询或配置快照不得被描述成无条件执行了本地恢复；是否需要恢复取决于会话中实际发生的状态改变。
+- 会话必须受仪器的单客户端限制、协议空闲限制及有界超时约束。断链、超时或响应不完整时，记录发生阶段、最后一条命令及结果是否确定；停止依赖该结果的下一步，不盲目重放设置、输出命令或 `READ?`。重新连接前先核对当前物理状态与仪器回读。
+- 现有单次 CLI 脚本可能在进程结束时关闭连接，不能因此宣称已实现跨命令、跨操作员步骤的持久会话。需要完整闭环时先使用支持该生命周期的会话模式；仅有单次命令模式时如实说明限制。
 
 ## 每次实验的最小闭环
 
@@ -66,7 +76,7 @@ description: Automate programmable bench instruments for closed-loop hardware ex
 
 ## 配套脚本
 
-`scripts/fluke_8845a.py` 提供脱敏身份查询、只读配置快照、本地操作恢复，以及受限前面板低压 DCV 采集。需要当前明确 IP 和全新的 `--out` 目录；实例及保护条件见 FLUKE 参考。采集结束尝试 `SYST:LOC` 并关闭 Socket；如果通信中断，明确报告本地恢复未验证，不重放写入。恢复本地操作不等于恢复全部原设置，更不是 `*RST`；仍可能接着电源时，不盲目切回短接用的小量程或电阻/电流档。
+`scripts/fluke_8845a.py` 提供脱敏身份查询、只读配置快照、本地操作恢复，以及受限前面板低压 DCV 采集。需要当前明确 IP 和全新的 `--out` 目录；实例及保护条件见 FLUKE 参考。独立的 `identify`／`snapshot`／`dcv` CLI 调用各自在结束时断联；多阶段实验使用前台 `session` 模式，在同一连接内执行 `snapshot` 和多个 `dcv` 阶段，到 `end` 才收尾。该模式已有一次有限实机验证，初连重置仍可能发生，不能宣称根因已解决。进入远程测量状态后，收尾时尝试 `SYST:LOC`；只读会话不做此写入。如果通信中断，明确报告本地恢复未验证，不重放写入。恢复本地操作不等于恢复全部原设置，更不是 `*RST`；仍可能接着电源时，不盲目切回短接用的小量程或电阻/电流档。
 
 `scripts/siglent_socket.py` 是无第三方依赖的 LAN 只读客户端，支持：
 
@@ -108,6 +118,8 @@ ZS407 屏幕保持 `Paused` 时仍可执行一次性 `scan`。脚本保存每次
 `scripts/litevna_zn406.py` 是受限的 LiteVNA SAA2 USB 适配器。它只允许文档化寄存器、限定 50 kHz–6.3 GHz 和 2–1024 点，每次源扫频都要求接线确认与独立 RF 输出授权，结束后请求恢复 Normal 模式并关闭串口。准确的 `ZN-406` 型号来自操作员读取机身标签；USB 标识只能证明兼容的 LiteVNA variant/protocol/hardware/firmware，不能独立证明销售型号。
 
 `scripts/litevna_calibration.py` 离线生成 PORT1 单端 OSL 与正向 S21 Isolation/THRU 响应校准系数，并拒绝频率网格不一致、OPEN/SHORT 退化或 THRU/Isolation 无法区分的数据。该结果不是双向 12 项 SOLT。参考面、线缆、转接头、频率网格或点数改变后必须重新校准；裸端口 OPEN 未知的边缘电容必须作为高频不确定度记录。
+
+MDP-M01/P906/L1060 的协议、固件背景、实机读数和未解决的收尾边界见 [MDP 联调参考](references/mdp-m01-p906-l1060.md)。这轮通过未纳入仓库的临时脚本完成；公开仓库不应把该记录表述成已有通用、可复用的 MDP 控制命令行工具。
 
 ## 运行目录约定
 

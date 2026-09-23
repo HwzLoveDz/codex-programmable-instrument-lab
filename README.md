@@ -4,12 +4,13 @@
 
 用于程控台式仪器的 Codex Skill：把测试意图、安全接线、仪器配置、采集、判定和证据留存组织成可复现的硬件实验闭环。
 
-当前经过实机命令流程验证的目标包括 **SIGLENT SDS3104X HD**、**tinySA Ultra+ ZS407**、**LiteVNA 64 ZN-406** 和 **FLUKE 8845A**。tinySA 与 LiteVNA 分别使用 USB 文本命令和 USB 二进制协议，而不是 SCPI；FLUKE 使用 LAN SCPI。仓库同时保留适配器约定，方便后续增加信号源、电源、电子负载和其他程控仪器，但不会假定不同型号共享命令或传输协议。
+已有完整或受限实机流程覆盖 **SIGLENT SDS3104X HD**、**tinySA Ultra+ ZS407**、**LiteVNA 64 ZN-406** 和 **FLUKE 8845A**。另完成一轮 **MDP-M01 + P906 + L1060 + FLUKE 8845A** 低功率联调。MDP-M01 使用 MINIWARE 专有 USB 二进制协议，不是 SCPI；本仓库目前提供该轮协议与结果参考，尚未提供可直接执行的受维护 MDP CLI/适配器。不同型号不共用未经验证的命令或传输假设。
 
 ## 当前能力
 
 - SIGLENT LAN 原生 SCPI Socket（TCP 5025）只读识别、查询和截图；
 - FLUKE 8845A LAN（TCP 3490）脱敏识别、配置快照、低压直流采集及本地操作恢复；
+- 一轮 MDP-M01 USB 控制的 P906 5 V 电源、L1060 CC 电子负载与 FLUKE 8845A 并行测量联调，记录控制器状态回读与仪表读数差异；
 - 严格校验 SCPI 查询头、完整 LF 文本响应、二进制边界及 PNG CRC；
 - SDS3104X HD + SP3050A + 前面板 Cal 的受限闭环；
 - ZS407 USB CDC 串口识别、安全暂停、一次性窄带扫描及 off/on 对比；
@@ -99,10 +100,22 @@ python scripts/fluke_8845a.py --host <current-dmm-ip> --out runs/dmm-config snap
 
 ```text
 python scripts/fluke_8845a.py --host <current-dmm-ip> --out runs/dmm-3v3 dcv --range-v 10 --count 10 --phase rail-3v3 --operator-state "3.3 V rail connected to front INPUT HI/LO" --confirm-wiring --confirm-state-changes
-python scripts/fluke_8845a.py --host <current-dmm-ip> --out runs/dmm-local restore-local --confirm-state-changes
 ```
 
-适配器只接受已处于前面板 DCV 的仪器，核对数学功能、触发方式和量程回读。结束恢复本地操作，保留适用量程并关闭连接；它不会执行调零、复位或校准。短接及 3.3 V 采集命令已经过实机验证；各 Python 分支的验证层级见 [FLUKE 参考](references/fluke-8845a.md)。
+多阶段实验使用一个前台会话，跨阶段复用同一 TCP 连接；在会话标准输入中逐行发送 JSON，最后用 `end` 收尾：
+
+```text
+python scripts/fluke_8845a.py --host <current-dmm-ip> --retry-identity-once --out runs/dmm-session session
+{"op":"snapshot"}
+{"op":"dcv","range_v":10,"count":3,"phase":"rail-3v3","operator_state":"front INPUT HI/LO on the confirmed low-voltage rail","confirm_wiring":true,"confirm_state_changes":true}
+{"op":"end"}
+```
+
+`identify`、`snapshot`、`dcv` 单次命令仍适合独立诊断，每次调用结束会断联；完整实验应使用 `session`。适配器只接受已处于前面板 DCV 的仪器，核对数学功能、触发方式和量程回读。进入远程测量后，会话结束时尝试恢复本地操作，保留适用量程并关闭连接；它不会执行调零、复位或校准。短接、3.3 V 采集和持久会话已分别做过有限实机验证；证据边界见 [FLUKE 参考](references/fluke-8845a.md)。
+
+### MDP-M01、P906 与 L1060 联调记录
+
+已用 M01 的专有 USB 二进制链路确认配对的 P906/L1060 状态并完成一轮 5 V、100 mA CC 轻载测试；Fluke 8845A 跨三个阶段保持一个 LAN 会话。外部测得空载均值 5.006109 V、接入负载均值 5.001783 V（变化 −4.326 mV）。当时没有预先定义电源准确度阈值，所以这是探索性结果，不是合格判定。M01 内部状态回报的 L1060 端电压约 4.938 V，与并联 Fluke 约 5.002 V 不一致，原因未查明。结束时远程请求关闭 P906 未获回读确认；操作者随后手动关机，新的 M01 状态读取确认 P906 和 L1060 均 OFF。协议与完整证据边界见 [MDP 联调参考](references/mdp-m01-p906-l1060.md)。该记录不是一个可直接调用的 MDP 控制 CLI。
 
 ## 安全边界
 
@@ -118,6 +131,7 @@ python scripts/fluke_8845a.py --host <current-dmm-ip> --out runs/dmm-local resto
 - 涉及现实世界换线、探头位置或 DUT 状态时，脚本不能自行感知完成：必须给出一个明确动作、等待操作员确认、再采集，并在采集结束后立即说明可以移动。
 - LiteVNA 的准确 `ZN-406` 型号来自操作员核对机身标签；USB 电子读回只证明兼容的 LiteVNA variant/protocol。机内校准不会自动应用到 USB 原始数据。
 - FLUKE 的 `READ?` 会触发测量，不能混入只读配置查询；数学／相对值功能开启、非立即单样本触发时，受限脚本停止而不暗改设置。低速 DC 样本跨度不是纹波，未知容差时不做合格判定。
+- MDP-M01 的串口写入不是设备回执。设置或输出切换必须等状态帧核对；远程 OFF 未能确认时立即停止，不重复发送以碰运气，并让操作者物理确认后再做只读回读。
 - 操作员报告意外断开后，保留原始阶段并记录更正，新建阶段重测。仪器连接被重置时最多显式重试一次身份建链；不在写入或采集结果不确定后自动重放。
 
 ## 隐私与证据
@@ -148,6 +162,7 @@ python -B -m unittest discover -s scripts -p "test_*.py"
 - [Zeenko LiteVNA product page](https://www.zeenko.tech/litevna)
 - [LiteVNA User Guide](https://nanovna.com/wp-content/uploads/2021/11/LiteVNA_User-Guide.pdf)
 - [FLUKE 8845A/8846A Programmers Manual](https://media.fluke.com/8f58fba8-10bb-438b-a91b-b10800c2bbc4_original%20file.pdf)
+- [MINIWARE MDP firmware, upper-computer, and source-code downloads](https://forum.minidso.com/forum.php?mod=viewthread&tid=3685)
 
 ## 许可证
 

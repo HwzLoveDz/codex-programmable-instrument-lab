@@ -1,3 +1,4 @@
+import io
 import json
 import socketserver
 import tempfile
@@ -20,6 +21,7 @@ class Server(socketserver.ThreadingTCPServer):
 class Handler(socketserver.StreamRequestHandler):
     def handle(self):
         self.request.settimeout(2)
+        self.server.state["connections"] += 1
         try:
             for raw in self.rfile:
                 command = raw.decode("ascii").strip()
@@ -54,7 +56,7 @@ class Handler(socketserver.StreamRequestHandler):
 @contextmanager
 def server(overrides=None):
     srv = Server(("127.0.0.1", 0), Handler)
-    srv.state = {"commands": [], "range": "0.1", "overrides": overrides or {}}
+    srv.state = {"commands": [], "connections": 0, "range": "0.1", "overrides": overrides or {}}
     thread = threading.Thread(target=srv.serve_forever)
     thread.start()
     try:
@@ -205,6 +207,25 @@ class FlukeTest(unittest.TestCase):
             c._exchange("*IDN?")
         self.assertTrue(sock.closed)
 
+    def test_interrupt_during_exchange_discards_partial_connection(self):
+        class InterruptSocket:
+            closed = False
+            def settimeout(self, _): pass
+            def sendall(self, _): pass
+            def recv(self, _): raise KeyboardInterrupt()
+            def close(self): self.closed = True
+        c = f.Fluke8845A("127.0.0.1")
+        sock = InterruptSocket()
+        c.sock = sock
+        c.identified = True
+        c.remote_restore_pending = True
+        with self.assertRaises(KeyboardInterrupt):
+            c._exchange("READ?")
+        self.assertTrue(sock.closed)
+        self.assertIsNone(c.sock)
+        self.assertTrue(c.remote_restore_pending)
+        self.assertEqual(c.log[-1]["error"], "KeyboardInterrupt")
+
     def test_malformed_identity_never_logs_raw(self):
         with server({"*IDN?": "PRIVATE-UNPARSEABLE"}) as s:
             c = f.Fluke8845A("127.0.0.1", s.server_address[1])
@@ -226,6 +247,152 @@ class FlukeTest(unittest.TestCase):
             self.assertNotIn("SYNTHETIC-SERIAL", (out / "commands.jsonl").read_text(encoding="utf-8"))
             with self.assertRaises(FileExistsError):
                 f.main(args)
+
+    def test_session_reuses_one_connection_for_multiple_phases_then_restores(self):
+        with tempfile.TemporaryDirectory() as tmp, server() as s:
+            out = Path(tmp) / "session-run"
+            requests = [
+                {"op": "snapshot"},
+                {"op": "dcv", "range_v": 10, "count": 2, "phase": "before", "operator_state": "synthetic before",
+                 "confirm_wiring": True, "confirm_state_changes": True},
+                {"op": "snapshot"},
+                {"op": "dcv", "range_v": 10, "count": 1, "phase": "after", "operator_state": "synthetic after",
+                 "confirm_wiring": True, "confirm_state_changes": True},
+                {"op": "end"},
+            ]
+            stdin = io.StringIO("".join(json.dumps(x) + "\n" for x in requests))
+            stdout = io.StringIO()
+            with patch.object(f.sys, "stdin", stdin), patch.object(f.sys, "stdout", stdout):
+                code = f.main(["--host", "127.0.0.1", "--port", str(s.server_address[1]),
+                               "--out", str(out), "session"])
+            self.assertEqual(code, 0)
+            self.assertEqual(s.state["connections"], 1)
+            self.assertEqual(s.state["commands"].count("*IDN?"), 1)
+            self.assertEqual(s.state["commands"].count("SYST:REM"), 1)
+            self.assertEqual(s.state["commands"].count("READ?"), 3)
+            self.assertEqual(s.state["commands"].count("SYST:LOC"), 1)
+            self.assertEqual(s.state["commands"][-2:], ["SYST:LOC", "*OPC?"])
+            manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["script_version"], "1.1.0")
+            self.assertEqual(manifest["connection_count"], 1)
+            self.assertEqual(manifest["status"], "session_completed")
+            self.assertEqual([step["action"] for step in manifest["steps"]],
+                             ["snapshot", "dcv", "snapshot", "dcv", "end"])
+            self.assertTrue(manifest["local_restore"]["local_command_processed"])
+            self.assertEqual((out / "measurements.csv").read_text(encoding="utf-8").count("before,"), 2)
+            self.assertEqual((out / "measurements.csv").read_text(encoding="utf-8").count("after,"), 1)
+            events = [json.loads(line) for line in stdout.getvalue().splitlines()]
+            self.assertEqual(events[0]["event"], "session_ready")
+            self.assertIn("pid", events[0])
+            self.assertIn('"end"', events[0]["stop"])
+            self.assertEqual(events[-1]["event"], "session_ended")
+            self.assertTrue(events[-1]["socket_closed"])
+            logs = [json.loads(line) for line in (out / "commands.jsonl").read_text(encoding="utf-8").splitlines()]
+            self.assertEqual([entry["event"] for entry in logs if "event" in entry],
+                             ["connected", "socket_closed"])
+            self.assertNotIn("SYNTHETIC-SERIAL", json.dumps(manifest) + json.dumps(logs))
+
+    def test_read_only_session_does_not_write_local_command(self):
+        with tempfile.TemporaryDirectory() as tmp, server() as s:
+            out = Path(tmp) / "read-only"
+            with patch.object(f.sys, "stdin", io.StringIO('{"op":"snapshot"}\n{"op":"end"}\n')):
+                with patch.object(f.sys, "stdout", io.StringIO()):
+                    self.assertEqual(f.main(["--host", "127.0.0.1", "--port", str(s.server_address[1]),
+                                             "--out", str(out), "session"]), 0)
+            self.assertEqual(s.state["connections"], 1)
+            self.assertTrue(all(command.endswith("?") for command in s.state["commands"]))
+            manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["local_restore"], {"required": False})
+
+    def test_session_explicit_identity_retry_before_any_step(self):
+        with tempfile.TemporaryDirectory() as tmp, server() as s:
+            out = Path(tmp) / "retry"
+            original = f.socket.create_connection
+            attempts = []
+            def connect(*args, **kwargs):
+                attempts.append(1)
+                if len(attempts) == 1:
+                    raise ConnectionResetError("synthetic first connect reset")
+                return original(*args, **kwargs)
+            with patch.object(f.socket, "create_connection", side_effect=connect):
+                with patch.object(f.sys, "stdin", io.StringIO('{"op":"snapshot"}\n{"op":"end"}\n')):
+                    with patch.object(f.sys, "stdout", io.StringIO()):
+                        self.assertEqual(f.main(["--host", "127.0.0.1", "--port", str(s.server_address[1]),
+                                                 "--out", str(out), "--retry-identity-once", "session"]), 0)
+            self.assertEqual(len(attempts), 2)
+            self.assertEqual(s.state["connections"], 1)
+            self.assertEqual(s.state["commands"].count("*IDN?"), 1)
+            self.assertNotIn("SYST:LOC", s.state["commands"])
+            logs = (out / "commands.jsonl").read_text(encoding="utf-8")
+            self.assertIn("one_pre_mutation_identity_retry", logs)
+
+    def test_session_eof_restores_local_and_reports_incomplete(self):
+        with tempfile.TemporaryDirectory() as tmp, server() as s:
+            out = Path(tmp) / "eof"
+            request = {"op": "dcv", "range_v": 10, "count": 1, "phase": "before",
+                       "operator_state": "synthetic", "confirm_wiring": True, "confirm_state_changes": True}
+            with patch.object(f.sys, "stdin", io.StringIO(json.dumps(request) + "\n")):
+                with patch.object(f.sys, "stdout", io.StringIO()):
+                    self.assertEqual(f.main(["--host", "127.0.0.1", "--port", str(s.server_address[1]),
+                                             "--out", str(out), "session"]), 2)
+            self.assertEqual(s.state["connections"], 1)
+            self.assertEqual(s.state["commands"][-2:], ["SYST:LOC", "*OPC?"])
+            manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["status"], "incomplete_unexpected_stdin_eof")
+            self.assertTrue(manifest["local_restore"]["local_command_processed"])
+
+    def test_session_keyboard_interrupt_while_idle_restores_and_closes(self):
+        class InterruptedInput:
+            def __init__(self, first): self.first = first
+            def __iter__(self): return self
+            def __next__(self):
+                if self.first is not None:
+                    line, self.first = self.first, None
+                    return line
+                raise KeyboardInterrupt()
+        with tempfile.TemporaryDirectory() as tmp, server() as s:
+            out = Path(tmp) / "interrupt"
+            request = {"op": "dcv", "range_v": 10, "count": 1, "phase": "before",
+                       "operator_state": "synthetic", "confirm_wiring": True, "confirm_state_changes": True}
+            with patch.object(f.sys, "stdin", InterruptedInput(json.dumps(request) + "\n")):
+                with patch.object(f.sys, "stdout", io.StringIO()):
+                    self.assertEqual(f.main(["--host", "127.0.0.1", "--port", str(s.server_address[1]),
+                                             "--out", str(out), "session"]), 130)
+            self.assertEqual(s.state["connections"], 1)
+            self.assertEqual(s.state["commands"][-2:], ["SYST:LOC", "*OPC?"])
+            manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["status"], "incomplete_interrupted")
+            self.assertTrue(manifest["socket_closed"])
+
+    def test_session_partial_read_never_reconnects_or_replays(self):
+        with tempfile.TemporaryDirectory() as tmp, server({"READ?": b"3.32"}) as s:
+            out = Path(tmp) / "partial"
+            request = {"op": "dcv", "range_v": 10, "count": 2, "phase": "partial",
+                       "operator_state": "synthetic", "confirm_wiring": True, "confirm_state_changes": True}
+            with patch.object(f.sys, "stdin", io.StringIO(json.dumps(request) + "\n"
+                                                         + json.dumps({"op": "end"}) + "\n")):
+                with patch.object(f.sys, "stdout", io.StringIO()):
+                    self.assertEqual(f.main(["--host", "127.0.0.1", "--port", str(s.server_address[1]),
+                                             "--out", str(out), "session"]), 2)
+            self.assertEqual(s.state["connections"], 1)
+            self.assertEqual(s.state["commands"].count("READ?"), 1)
+            self.assertNotIn("SYST:LOC", s.state["commands"])
+            manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["status"], "incomplete_local_restore_unverified")
+            self.assertFalse(manifest["local_restore"]["local_command_processed"])
+
+    def test_session_rejects_invalid_operation_without_state_change(self):
+        with tempfile.TemporaryDirectory() as tmp, server() as s:
+            out = Path(tmp) / "invalid"
+            with patch.object(f.sys, "stdin", io.StringIO('{"op":"READ?"}\n')):
+                with patch.object(f.sys, "stdout", io.StringIO()):
+                    self.assertEqual(f.main(["--host", "127.0.0.1", "--port", str(s.server_address[1]),
+                                             "--out", str(out), "session"]), 2)
+            self.assertEqual(s.state["connections"], 1)
+            self.assertEqual(s.state["commands"], ["*IDN?"])
+            manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["steps"][0]["action"] if "action" in manifest["steps"][0] else None, None)
+            self.assertIn("ValueError", manifest["steps"][0]["error"])
 
     def test_validation_without_network(self):
         for host in ("<IP>", "169.254.x.x", "0.0.0.0", "224.0.0.1", "255.255.255.255"):
