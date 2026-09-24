@@ -1,11 +1,13 @@
 ---
 name: codex-programmable-instrument-lab
-description: Automate programmable bench instruments for closed-loop hardware experiments and evidence-backed validation. Use for SCPI, VISA, USB serial or binary protocols, oscilloscope, spectrum-analyzer, VNA, supply, electronic load, or multimeter acquisition and test reporting. Validated workflows include SIGLENT SDS3104X HD, tinySA Ultra+ ZS407, LiteVNA 64 ZN-406, FLUKE 8845A low-voltage DC, and one exploratory MDP-M01/P906/L1060 integration; the MDP adapter itself has only passed offline fake-serial tests so far.
+description: Automate programmable bench instruments for closed-loop hardware experiments and evidence-backed validation. Use for SCPI, VISA, USB serial or binary protocols, oscilloscope, spectrum-analyzer, VNA, supply, electronic load, or multimeter acquisition and test reporting. Validated workflows include SIGLENT SDS3104X HD, tinySA Ultra+ ZS407, LiteVNA 64 ZN-406, FLUKE 8845A low-voltage DC, and a limited MDP-M01/P906/L1060 low-power functional check.
 ---
 
 # 程控仪器闭环实验室
 
 把“测试意图 → 安全接线 → 仪器配置 → 采集 → 判定 → 原始证据与报告”做成可复现闭环。默认用中文沟通，命令、单位和原始返回值保持原样。
+
+收到硬件工程技能给出的实板测试目标时，先接收板版本、测点、预期电气范围、接线／参考地、激励上限、停止条件和判据；再按带宽、精度、输入额定值、探头／夹具和已验证控制能力选择最少的仪器。由本技能负责实时端点识别、安全配置、持久会话、采集和原始证据；把结果和未覆盖边界交回硬件技能分析。缺少执行必需的信息才向操作者追问，不自行推断实物接线或工况。
 
 ## 先选择工作模式
 
@@ -22,7 +24,7 @@ description: Automate programmable bench instruments for closed-loop hardware ex
 
 控制 FLUKE 8845A 万用表、排查 LAN 建链或读取低压直流电源时，先读 [references/fluke-8845a.md](references/fluke-8845a.md)。使用 TCP 3490 + LF，不套用示波器 5025；`READ?` 会触发采集，不能混入只读配置查询。
 
-控制 MDP-M01 配对的 P906 电源或 L1060 电子负载时，先读 [references/mdp-m01-p906-l1060.md](references/mdp-m01-p906-l1060.md)。M01 使用 USB CDC 上的 MINIWARE 专有二进制协议，不是 SCPI。仓库提供受限的 `scripts/mdp_m01.py` 初版适配器：状态识别、P906 定压／限流、L1060 CC 电流预置，以及需逐条确认的输出控制；截至目前只完成假串口离线测试，尚未由该适配器做实机验证。
+控制 MDP-M01 配对的 P906 电源或 L1060 电子负载时，先读 [references/mdp-m01-p906-l1060.md](references/mdp-m01-p906-l1060.md)。M01 使用 USB CDC 上的 MINIWARE 专有二进制协议，不是 SCPI。仓库提供受限的 `scripts/mdp_m01.py` 适配器：状态识别、P906 定压／限流、L1060 CC 电流预置，以及需逐条确认的输出控制。已用适配器完成 5 V/0.3 A 限流电源与 0.1 A CC 负载的有限实机闭环，并由 FLUKE 8845A 独立测量端电压；这验证了低功率功能，不代表额定范围或准确度验收。每次操作前重新确认模块在线和通道映射。
 
 ## 证据分层
 
@@ -119,9 +121,9 @@ ZS407 屏幕保持 `Paused` 时仍可执行一次性 `scan`。脚本保存每次
 
 `scripts/litevna_calibration.py` 离线生成 PORT1 单端 OSL 与正向 S21 Isolation/THRU 响应校准系数，并拒绝频率网格不一致、OPEN/SHORT 退化或 THRU/Isolation 无法区分的数据。该结果不是双向 12 项 SOLT。参考面、线缆、转接头、频率网格或点数改变后必须重新校准；裸端口 OPEN 未知的边缘电容必须作为高频不确定度记录。
 
-MDP-M01/P906/L1060 的协议、固件背景、实机读数和未解决的收尾边界见 [MDP 联调参考](references/mdp-m01-p906-l1060.md)。此前实机联调由当时未纳入仓库的临时脚本完成；该轮结果不能当作下面新适配器的实机验证。
+MDP-M01/P906/L1060 的协议、固件背景、分轮实机读数和未解决边界见 [MDP 联调参考](references/mdp-m01-p906-l1060.md)。2026-09-23 的轻载实机联调由当时未纳入仓库的临时脚本完成；它不能代替新适配器的 L1060 加载验证。
 
-`scripts/mdp_m01.py` 是 MDP-M01 的持久 USB CDC 会话适配器。仅支持状态读取、P906 输出关闭时同时设置电压／限流、L1060 已处于 CC 模式时设置电流，以及逐条带操作员确认的输出开关；不切换 L1060 模式，不假设固定通道，不自动恢复或关闭输出。须先读 MDP 联调参考；实机运行前由操作员核对接线、设备映射、输出状态、限值和停止条件。写入后必须用新的 M01 状态帧确认；超时／不匹配时停止，不重放输出命令。初版经假串口测试，实机验证仍待完成。
+`scripts/mdp_m01.py` 是 MDP-M01 的持久 USB CDC 会话适配器。仅支持状态读取、P906 输出关闭时同时设置电压／限流、L1060 已处于 CC 模式时设置电流，以及逐条带操作员确认的输出开关；不切换 L1060 模式，不假设固定通道，不自动恢复或关闭输出。须先读 MDP 联调参考；实机运行前由操作员核对接线、设备映射、输出状态、限值和停止条件。写入后必须用新的 M01 状态帧确认；超时／不匹配时停止，不重放输出命令。新适配器已完成一次 P906+L1060 低功率闭环；这不是全量程或准确度验收。M01 输出位和模拟电压字段可能不同步，端子达到目标电压或归零须独立测量，OFF 不等于零伏。
 
 ## 运行目录约定
 

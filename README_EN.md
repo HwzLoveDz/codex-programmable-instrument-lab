@@ -4,14 +4,16 @@
 
 A Codex skill for programmable bench instruments. It turns test intent, safe wiring, instrument configuration, acquisition, acceptance criteria, and evidence retention into a reproducible closed-loop hardware workflow.
 
-Complete or constrained hardware workflows cover the **SIGLENT SDS3104X HD**, **tinySA Ultra+ ZS407**, **LiteVNA 64 ZN-406**, and **FLUKE 8845A**. One low-power integration run also covered **MDP-M01 + P906 + L1060 + FLUKE 8845A**. MDP-M01 uses MINIWARE's proprietary USB binary protocol, not SCPI; this repository now includes an initial constrained MDP CLI/adapter, but it has only passed offline fake-serial tests and is not yet hardware-validated. Commands and transports are never assumed to be portable across models.
+Complete or constrained hardware workflows cover the **SIGLENT SDS3104X HD**, **tinySA Ultra+ ZS407**, **LiteVNA 64 ZN-406**, and **FLUKE 8845A**. One low-power functional integration run also covered **MDP-M01 + P906 + L1060 + FLUKE 8845A**. MDP-M01 uses MINIWARE's proprietary USB binary protocol, not SCPI. The constrained adapter completed a live 5 V supply / 0.1 A CC load loop with independent FLUKE voltage measurements. This is a limited functional check, not a rated-range or accuracy acceptance test. Commands and transports are never assumed to be portable across models.
+
+For board-level integration, the hardware-engineering skill first translates the request and board revision into measurement points, reference ground, wiring risks, stimulus limits, and acceptance criteria. This skill then selects instruments with suitable accuracy, bandwidth, safety ratings, and verified control capabilities, acquires raw evidence, and returns it for hardware analysis. The operator confirms any missing physical wiring or safety-critical conditions; software state is not used to guess them.
 
 ## Current capabilities
 
 - SIGLENT native SCPI over LAN sockets (TCP 5025) for read-only identification, queries, and screenshots;
 - FLUKE 8845A LAN control (TCP 3490) for redacted identification, configuration snapshots, low-voltage DC acquisition, and local-control restoration;
 - one low-power integration run using MDP-M01 USB control for a P906 5 V supply and L1060 CC load, measured in parallel with a FLUKE 8845A and documented with status readback and meter discrepancies;
-- persistent MDP-M01 USB sessions, status reads, constrained P906/L1060-CC setpoints and readback, and per-command-confirmed output control (fake-serial tested; hardware validation pending);
+- persistent MDP-M01 USB sessions, status reads, constrained P906/L1060-CC setpoints and readback, per-command-confirmed output control, and a live 5 V / 0.1 A CC P906+L1060 functional loop;
 - strict validation of SCPI query headers, complete LF-terminated text responses, binary boundaries, and PNG CRCs;
 - a constrained SDS3104X HD + SP3050A + front-panel Cal loop;
 - ZS407 USB CDC identification, safe pause, one-shot narrow scans, and matched off/on comparisons;
@@ -126,16 +128,16 @@ python scripts/mdp_m01.py --port <current MDP-M01 serial port> session
 {"op":"arm","max_voltage_v":5,"max_current_a":0.3,"max_power_w":1.5,"confirm_wiring":true}
 {"op":"set_p906","channel":1,"voltage_v":5,"current_limit_a":0.3}
 {"op":"set_l1060_cc","channel":2,"current_a":0.1}
-{"op":"output_on","channel":2,"confirm_energy":true}
 {"op":"output_on","channel":1,"confirm_energy":true}
+{"op":"output_on","channel":2,"confirm_energy":true}
 {"op":"output_off","channel":2}
 {"op":"output_off","channel":1}
 {"op":"end"}
 ```
 
-Channel numbers and values above are examples only. First use `status` to identify each device, then check real wiring, polarity, load, and limits before acting. `arm` requires all online outputs to be OFF; setpoints can only be changed while the respective output is OFF. Wait for a new status frame after every state change. Never replay an output command after a timeout or mismatch; have the operator inspect the physical state. `end` reads the final state and closes USB but does not switch outputs off. Explicitly turn off and verify each relevant output before ending the experiment. The adapter has only been tested with a fake serial port; hardware validation is pending. See the [MDP integration reference](references/mdp-m01-p906-l1060.md) for protocol and evidence boundaries.
+Channel numbers and values above are examples only. First use `status` to identify each device, then check real wiring, polarity, load, and limits before acting. `arm` requires all online outputs to be OFF; setpoints can only be changed while the respective output is OFF. Wait for a new status frame after every state change. After switching P906 ON, independently confirm that its terminal voltage has reached a stable target before enabling L1060; the M01 output bit and analog voltage field can lag each other. Never replay an output command after a timeout or mismatch; have the operator inspect the physical state. `end` reads the final state and closes USB but does not switch outputs off. Explicitly turn off and verify each relevant output before ending the experiment, but do not equate OFF with zero terminal volts. The adapter completed a limited 5 V P906 / 0.1 A L1060 CC functional loop; other modes, ranges, and accuracy need separate validation. See the [MDP integration reference](references/mdp-m01-p906-l1060.md) for protocol and evidence boundaries.
 
-The earlier low-power hardware run used a temporary program to confirm paired P906/L1060 status and run a 5 V, 100 mA CC light-load check; one FLUKE 8845A LAN session was retained across all three phases. The DMM means were 5.006109 V with the load off and 5.001783 V with it on (a −4.326 mV change). No supply-accuracy acceptance limit was defined, so this remains exploratory, not a pass/fail result. M01 telemetry reported about 4.938 V at the L1060 input, inconsistent with the parallel FLUKE reading of about 5.002 V; the cause has not been determined. The remote P906 OFF request was not confirmed by readback; the operator then switched it off locally, and a subsequent M01 status read confirmed both P906 and L1060 OFF. That run does not count as hardware validation of the new adapter. See the [MDP integration reference](references/mdp-m01-p906-l1060.md) for details.
+An earlier, 2026-09-23 run used a temporary program for an exploratory 5 V, 100 mA CC light-load check; no accuracy criterion was defined. On 2026-09-24, the new adapter completed the low-power loop. FLUKE means were 5.005994 V unloaded and 5.001688 V with the 0.1 A CC load (−4.306 mV); a later M01 status frame reported 0.099 A at the load and 0.107 A at the supply. Both outputs were confirmed OFF, and the terminal decayed to 3.11 mV after about 20 seconds. This validates limited low-power control and status feedback, not supply accuracy. Some M01 analog voltage fields differed from the independent meter reading. See the [MDP integration reference](references/mdp-m01-p906-l1060.md) for details.
 
 ## Safety boundaries
 
